@@ -11,7 +11,10 @@
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
     "seed:local": "hardhat run scripts/seedDemoData.ts --network localhost",
     "seed:hardhat": "hardhat run scripts/seedDemoData.ts",
-    "start:demo-api": "ts-node sdk/demoApiServer.ts"
+    "start:demo-api": "ts-node sdk/demoApiServer.ts",
+    "frontend:typecheck": "npm --prefix frontend run typecheck",
+    "frontend:build": "npm --prefix frontend run build",
+    "frontend:start": "npm --prefix frontend run start"
   },
   "keywords": [
     "blockchain",

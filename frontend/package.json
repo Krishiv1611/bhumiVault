@@ -1,0 +1,11 @@
+{
+  "name": "bhumi-vault-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "node ../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "build": "node ../node_modules/typescript/bin/tsc -p tsconfig.json && node scripts/build.mjs",
+    "start": "node scripts/serve.mjs"
+  }
+}

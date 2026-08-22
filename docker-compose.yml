@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: bhumivault-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: bhumivault
+      POSTGRES_PASSWORD: bhumivault
+      POSTGRES_DB: bhumivault
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - bhumivault-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  bhumivault-postgres-data:
