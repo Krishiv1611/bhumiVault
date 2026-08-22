@@ -14,7 +14,6 @@ const client = new BhumiVaultClient(RPC_URL);
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 
 // Default Hardhat Signer Private Keys for Demo / Prototype
-// In production, each stakeholder provides their own signature / private key
 const MOCK_KEYS = {
   admin: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
   registrar: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
@@ -43,10 +42,8 @@ app.get("/api/health", async (req: Request, res: Response) => {
 });
 
 // -------------------------------------------------------------
-// 2. QUERY ENDPOINTS (PUBLIC & STAKEHOLDERS)
+// 2. QUERY ENDPOINTS
 // -------------------------------------------------------------
-
-// Get property details
 app.get("/api/property/:parcelId", async (req: Request, res: Response) => {
   try {
     const { parcelId } = req.params;
@@ -57,7 +54,6 @@ app.get("/api/property/:parcelId", async (req: Request, res: Response) => {
   }
 });
 
-// Get chronological ownership audit trail
 app.get("/api/property/:parcelId/history", async (req: Request, res: Response) => {
   try {
     const { parcelId } = req.params;
@@ -68,7 +64,6 @@ app.get("/api/property/:parcelId/history", async (req: Request, res: Response) =
   }
 });
 
-// Fast public title verification (checks mortgage, dispute, freeze)
 app.get("/api/property/:parcelId/verify", async (req: Request, res: Response) => {
   try {
     const { parcelId } = req.params;
@@ -79,7 +74,6 @@ app.get("/api/property/:parcelId/verify", async (req: Request, res: Response) =>
   }
 });
 
-// Verify document hash against on-chain title deed
 app.post("/api/property/verify-document", async (req: Request, res: Response) => {
   try {
     const { parcelId, documentText, documentHash } = req.body;
@@ -143,7 +137,7 @@ app.post("/api/property/register", async (req: Request, res: Response) => {
 // 4. 2-KEY TRANSFER AUTHORIZATION ENGINE
 // -------------------------------------------------------------
 
-// Step 1: Owner initiates transfer
+// Step 1: Owner initiates transfer (Standard Web3)
 app.post("/api/transfer/initiate", async (req: Request, res: Response) => {
   try {
     const { parcelId, buyerAddress, saleConsideration, saleDeedHash, sellerPrivateKey } = req.body;
@@ -160,6 +154,33 @@ app.post("/api/transfer/initiate", async (req: Request, res: Response) => {
     res.json({
       success: true,
       message: `Transfer initiated for ${parcelId} (Key 1 provided)`,
+      transactionHash: receipt?.hash,
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// Step 1 (Gasless): Relayer submits off-chain EIP-712 signature for rural citizen
+app.post("/api/transfer/initiate-gasless", async (req: Request, res: Response) => {
+  try {
+    const { parcelId, sellerAddress, buyerAddress, saleConsideration, saleDeedHash, deadline, sellerSignature } = req.body;
+    const relayerSigner = new Wallet(MOCK_KEYS.registrar, provider);
+
+    const receipt = await client.initiateTransferWithSignature(
+      parcelId,
+      sellerAddress,
+      buyerAddress,
+      saleConsideration,
+      saleDeedHash,
+      deadline,
+      sellerSignature,
+      relayerSigner
+    );
+
+    res.json({
+      success: true,
+      message: `Gasless Transfer initiated for ${parcelId} via EIP-712 signature`,
       transactionHash: receipt?.hash,
     });
   } catch (err: any) {
@@ -209,7 +230,7 @@ app.post("/api/mortgage/apply", async (req: Request, res: Response) => {
     const { parcelId, bankName, loanReference, loanAmount, mortgageDocHash } = req.body;
     const signer = new Wallet(MOCK_KEYS.bankOfficer, provider);
 
-    const receipt = await client.applyMortgage(
+    const mortgageId = await client.applyMortgage(
       parcelId,
       bankName,
       loanReference,
@@ -221,7 +242,7 @@ app.post("/api/mortgage/apply", async (req: Request, res: Response) => {
     res.json({
       success: true,
       message: `Bank mortgage lien placed on ${parcelId}. Transfers locked.`,
-      transactionHash: receipt?.hash,
+      mortgageId,
     });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
@@ -230,11 +251,12 @@ app.post("/api/mortgage/apply", async (req: Request, res: Response) => {
 
 app.post("/api/mortgage/release", async (req: Request, res: Response) => {
   try {
-    const { parcelId, releaseDocHash } = req.body;
+    const { parcelId, mortgageId, releaseDocHash } = req.body;
     const signer = new Wallet(MOCK_KEYS.bankOfficer, provider);
 
     const receipt = await client.releaseMortgage(
       parcelId,
+      mortgageId,
       releaseDocHash || BhumiVaultClient.computeSHA256(`RELEASE_${parcelId}`),
       signer
     );
@@ -257,7 +279,7 @@ app.post("/api/dispute/apply", async (req: Request, res: Response) => {
     const { parcelId, courtName, caseNumber, courtOrderHash, reason } = req.body;
     const signer = new Wallet(MOCK_KEYS.judge, provider);
 
-    const receipt = await client.applyDisputeInjunction(
+    const disputeId = await client.applyDisputeInjunction(
       parcelId,
       courtName,
       caseNumber,
@@ -269,7 +291,7 @@ app.post("/api/dispute/apply", async (req: Request, res: Response) => {
     res.json({
       success: true,
       message: `Judiciary Dispute Injunction applied on ${parcelId}. Property frozen.`,
-      transactionHash: receipt?.hash,
+      disputeId,
     });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
@@ -278,11 +300,12 @@ app.post("/api/dispute/apply", async (req: Request, res: Response) => {
 
 app.post("/api/dispute/lift", async (req: Request, res: Response) => {
   try {
-    const { parcelId, judgmentDocHash } = req.body;
+    const { parcelId, disputeId, judgmentDocHash } = req.body;
     const signer = new Wallet(MOCK_KEYS.judge, provider);
 
     const receipt = await client.liftDisputeInjunction(
       parcelId,
+      disputeId,
       judgmentDocHash || BhumiVaultClient.computeSHA256(`JUDGMENT_${parcelId}`),
       signer
     );
@@ -290,6 +313,47 @@ app.post("/api/dispute/lift", async (req: Request, res: Response) => {
     res.json({
       success: true,
       message: `Court dispute resolved and injunction lifted on ${parcelId}.`,
+      transactionHash: receipt?.hash,
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// 7. MULTI-SIG LOST KEY / INHERITANCE RECOVERY
+// -------------------------------------------------------------
+app.post("/api/recovery/initiate", async (req: Request, res: Response) => {
+  try {
+    const { parcelId, proposedNewOwner, recoveryReasonDocHash } = req.body;
+    const signer = new Wallet(MOCK_KEYS.registrar, provider);
+
+    const receipt = await client.initiateOwnershipRecovery(
+      parcelId,
+      proposedNewOwner,
+      recoveryReasonDocHash || BhumiVaultClient.computeSHA256(`RECOVERY_${parcelId}`),
+      signer
+    );
+
+    res.json({
+      success: true,
+      message: `Recovery initiated by Sub-Registrar (1 of 2 signatures). Waiting for District Court Judge approval.`,
+      transactionHash: receipt?.hash,
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/recovery/approve", async (req: Request, res: Response) => {
+  try {
+    const { parcelId } = req.body;
+    const signer = new Wallet(MOCK_KEYS.judge, provider);
+
+    const receipt = await client.approveOwnershipRecovery(parcelId, signer);
+    res.json({
+      success: true,
+      message: `Recovery approved by District Court Judge (2 of 2 signatures). Ownership re-assigned on blockchain!`,
       transactionHash: receipt?.hash,
     });
   } catch (err: any) {

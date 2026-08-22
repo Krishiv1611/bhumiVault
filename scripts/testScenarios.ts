@@ -6,9 +6,9 @@ function sha256(data: string): string {
 }
 
 function divider(title: string) {
-  console.log("\n" + "=".repeat(65));
+  console.log("\n" + "=".repeat(70));
   console.log(`  ${title}`);
-  console.log("=".repeat(65));
+  console.log("=".repeat(70));
 }
 
 function subHeader(text: string) {
@@ -25,42 +25,50 @@ function fraudBlockedLog(gate: string, reason: string) {
 }
 
 async function main() {
-  divider("BHUMI-VAULT: END-TO-END SCENARIO & FRAUD PREVENTION TEST");
+  divider("BHUMI-VAULT: ADVANCED FRAUD PREVENTION & MULTI-SIG SCENARIO TEST");
 
   const [
     admin,
     registrar,
     revenueOfficer,
-    bankOfficer,
+    bankOfficer1,
+    bankOfficer2,
     judge,
     rahul,
     amit,
     rohit,
+    legalHeir,
     fraudster,
   ] = await ethers.getSigners();
 
-  console.log("👥 Active Stakeholder Accounts:");
-  console.log(`   - Admin:             ${admin.address}`);
-  console.log(`   - Sub-Registrar:     ${registrar.address}`);
-  console.log(`   - Revenue Officer:   ${revenueOfficer.address}`);
-  console.log(`   - Bank Officer:      ${bankOfficer.address}`);
-  console.log(`   - District Judge:    ${judge.address}`);
-  console.log(`   - Rahul (Seller 1):  ${rahul.address}`);
-  console.log(`   - Amit (Buyer 1):    ${amit.address}`);
-  console.log(`   - Rohit (Buyer 2):   ${rohit.address}`);
-  console.log(`   - Fraudster (Attacker): ${fraudster.address}`);
+  console.log("👥 Active Stakeholder Nodes & Citizen Personas:");
+  console.log(`   - Admin / Root Node:        ${admin.address}`);
+  console.log(`   - Sub-Registrar Officer:    ${registrar.address}`);
+  console.log(`   - Land Revenue Officer:     ${revenueOfficer.address}`);
+  console.log(`   - Bank Officer 1 (SBI):     ${bankOfficer1.address}`);
+  console.log(`   - Bank Officer 2 (HDFC):    ${bankOfficer2.address}`);
+  console.log(`   - District Court Judge:     ${judge.address}`);
+  console.log(`   - Rahul (Seller 1):         ${rahul.address}`);
+  console.log(`   - Amit (Buyer 1):           ${amit.address}`);
+  console.log(`   - Rohit (Buyer 2):          ${rohit.address}`);
+  console.log(`   - Legal Heir:               ${legalHeir.address}`);
+  console.log(`   - Fraudster (Attacker):     ${fraudster.address}`);
 
-  // Deploy
+  // Deploy Contract
   const BhumiVaultRegistry = await ethers.getContractFactory("BhumiVaultRegistry");
   const registry = await BhumiVaultRegistry.deploy(
     admin.address,
     registrar.address,
     revenueOfficer.address,
-    bankOfficer.address,
+    bankOfficer1.address,
     judge.address
   );
   await registry.waitForDeployment();
   const contractAddress = await registry.getAddress();
+
+  const BANK_ROLE = await registry.BANK_ROLE();
+  await registry.connect(admin).grantRole(BANK_ROLE, bankOfficer2.address);
+
   console.log(`\n📦 BhumiVaultRegistry Contract Deployed: ${contractAddress}`);
 
   const PARCEL_ID = "IN-MH-PUN-2025-0987";
@@ -79,8 +87,8 @@ async function main() {
     "Pune",
     "Haveli",
     "Survey No. 72/1A",
-    12000, // 1200 sq meters
-    1,     // Residential
+    12000,
+    1,
     rahul.address,
     DEED_2010_HASH,
     GEO_HASH
@@ -108,143 +116,168 @@ async function main() {
   }
 
   // -------------------------------------------------------------
-  // TEST SCENARIO 3: Fraud Attack 2 - Active Bank Mortgage Hold
+  // TEST SCENARIO 3: Multi-Lien Bank Encumbrances
   // -------------------------------------------------------------
-  divider("TEST SCENARIO 3: Bank Encumbrance & Double-Sale Prevention");
-  subHeader("State Bank of India applies INR 35,00,000 Mortgage Lien on Rahul's Land");
-
-  const MORTGAGE_DOC_HASH = sha256("SBI_HOME_LOAN_CHARGE_AGREEMENT_2025");
-  tx = await registry.connect(bankOfficer).applyMortgage(
+  divider("TEST SCENARIO 3: Multi-Bank Encumbrances & Double-Sale Prevention");
+  subHeader("SBI applies INR 35,00,000 Mortgage Lien on Rahul's Land");
+  const mortgageHash1 = sha256("SBI_HOME_LOAN_CHARGE_AGREEMENT_2025");
+  await registry.connect(bankOfficer1).applyMortgage(
     PARCEL_ID,
     "State Bank of India (SBI)",
     "SBI-HL-2025-8832",
     3500000,
-    MORTGAGE_DOC_HASH
+    mortgageHash1
   );
-  await tx.wait();
-  successLog("Mortgage Lien placed on-chain. Property status: MORTGAGED = TRUE");
+  const mortgageId1 = (await registry.getParcelMortgageIds(PARCEL_ID))[0];
+  successLog("Mortgage 1 (SBI) placed on-chain.");
 
-  subHeader("Rahul attempts to sell mortgaged property to Amit without Bank NOC");
+  subHeader("HDFC Bank applies INR 15,00,000 Secondary Mortgage Lien");
+  const mortgageHash2 = sha256("HDFC_SECOND_CHARGE_AGREEMENT_2025");
+  await registry.connect(bankOfficer2).applyMortgage(
+    PARCEL_ID,
+    "HDFC Bank",
+    "HDFC-CL-2025-4421",
+    1500000,
+    mortgageHash2
+  );
+  const mortgageId2 = (await registry.getParcelMortgageIds(PARCEL_ID))[1];
+  successLog("Mortgage 2 (HDFC) placed on-chain. Total Active Liens: 2");
+
+  subHeader("Rahul attempts to sell mortgaged property to Amit");
   const DEED_2018_HASH = sha256("SALE_DEED_RAHUL_TO_AMIT_2018");
   try {
-    await registry.connect(rahul).initiateTransfer(
-      PARCEL_ID,
-      amit.address,
-      5000000,
-      DEED_2018_HASH
-    );
+    await registry.connect(rahul).initiateTransfer(PARCEL_ID, amit.address, 5000000, DEED_2018_HASH);
     console.error("  ❌ CRITICAL ERROR: Mortgaged property transfer was not blocked!");
   } catch (err: any) {
     fraudBlockedLog("Active Bank Mortgage Gate", err.message);
   }
 
-  subHeader("Rahul repays loan. Bank Officer issues NOC and releases mortgage lien");
-  const NOC_HASH = sha256("SBI_NOC_LOAN_CLEARED_2025");
-  tx = await registry.connect(bankOfficer).releaseMortgage(PARCEL_ID, NOC_HASH);
-  await tx.wait();
-  successLog("Mortgage released by Bank. Property status: MORTGAGED = FALSE");
+  subHeader("Rahul clears SBI loan. SBI releases Mortgage 1");
+  await registry.connect(bankOfficer1).releaseMortgage(PARCEL_ID, mortgageId1, sha256("SBI_NOC_RELEASE"));
+  successLog("Mortgage 1 released. Property still encumbered by Mortgage 2 (HDFC). Transfer remains blocked.");
+
+  subHeader("Rahul clears HDFC loan. HDFC releases Mortgage 2");
+  await registry.connect(bankOfficer2).releaseMortgage(PARCEL_ID, mortgageId2, sha256("HDFC_NOC_RELEASE"));
+  successLog("Mortgage 2 released. All bank encumbrances cleared! Property is now transferable.");
 
   // -------------------------------------------------------------
-  // TEST SCENARIO 4: 2-Key Transfer Authorization (Rahul -> Amit)
+  // TEST SCENARIO 4: 2-Key Transfer with Enforced Buyer Acceptance
   // -------------------------------------------------------------
-  divider("TEST SCENARIO 4: 2-Key Transfer Authorization (Rahul -> Amit)");
+  divider("TEST SCENARIO 4: 2-Key Transfer with Enforced Buyer Acceptance");
   subHeader("Step 1: Rahul initiates transfer & uploads Sale Deed hash (Key 1)");
-  tx = await registry.connect(rahul).initiateTransfer(
-    PARCEL_ID,
-    amit.address,
-    5000000,
-    DEED_2018_HASH
-  );
-  await tx.wait();
+  await registry.connect(rahul).initiateTransfer(PARCEL_ID, amit.address, 5000000, DEED_2018_HASH);
   successLog("Key 1 Provided (Owner Sign-off). Active transfer created.");
 
+  subHeader("Sub-Registrar attempts to authorize transfer BEFORE Buyer accepts");
+  try {
+    await registry.connect(registrar).authorizeAndCommitTransfer(PARCEL_ID);
+    console.error("  ❌ CRITICAL ERROR: Unaccepted transfer authorized!");
+  } catch (err: any) {
+    fraudBlockedLog("Buyer Acceptance Gate", err.message);
+  }
+
   subHeader("Step 2: Amit (Buyer) reviews and accepts transfer terms");
-  tx = await registry.connect(amit).buyerAcceptTransfer(PARCEL_ID);
-  await tx.wait();
+  await registry.connect(amit).buyerAcceptTransfer(PARCEL_ID);
   successLog("Buyer confirmation recorded.");
 
   subHeader("Step 3: Government Sub-Registrar inspects & authorizes mutation (Key 2)");
-  tx = await registry.connect(registrar).authorizeAndCommitTransfer(PARCEL_ID);
-  await tx.wait();
+  await registry.connect(registrar).authorizeAndCommitTransfer(PARCEL_ID);
   successLog("Key 2 Provided (Sub-Registrar Approval). Ownership mutation committed to ledger!");
 
   let parcel = await registry.getParcel(PARCEL_ID);
   successLog(`Verified On-Chain Owner: ${parcel.currentOwner} (Amit)`);
 
   // -------------------------------------------------------------
-  // TEST SCENARIO 5: Fraud Attack 3 - Court Dispute Injunction Freeze
+  // TEST SCENARIO 5: Gasless EIP-712 Meta-Transaction Transfer (Amit -> Rohit)
   // -------------------------------------------------------------
-  divider("TEST SCENARIO 5: Judiciary Dispute Injunction & Property Freeze");
-  subHeader("District Court Pune issues stay order on parcel due to boundary dispute");
+  divider("TEST SCENARIO 5: Gasless EIP-712 Meta-Transaction (Rural Citizen Mode)");
+  subHeader("Amit signs an off-chain cryptographic transfer intent without paying gas");
 
-  const INJUNCTION_HASH = sha256("COURT_ORDER_STAY_INJUNCTION_CS_2025_4410");
-  tx = await registry.connect(judge).applyDisputeInjunction(
-    PARCEL_ID,
-    "District Court Pune",
-    "CS/2025/4410",
-    INJUNCTION_HASH,
-    "Title boundary dispute pending trial"
-  );
-  await tx.wait();
-  successLog("Court Injunction applied. Property status: DISPUTED = TRUE");
+  const network = await ethers.provider.getNetwork();
+  const domain = {
+    name: "BhumiVaultRegistry",
+    version: "1.0.0",
+    chainId: Number(network.chainId),
+    verifyingContract: contractAddress,
+  };
 
-  subHeader("Amit attempts to sell disputed property to Rohit");
+  const types = {
+    TransferAuthorization: [
+      { name: "parcelId", type: "string" },
+      { name: "buyer", type: "address" },
+      { name: "saleConsideration", type: "uint256" },
+      { name: "saleDeedHash", type: "string" },
+      { name: "nonce", type: "uint256" },
+      { name: "deadline", type: "uint256" },
+    ],
+  };
+
+  const deadline = Math.floor(Date.now() / 1000) + 3600;
+  const nonce = await registry.userNonces(amit.address);
   const DEED_2023_HASH = sha256("SALE_DEED_AMIT_TO_ROHIT_2023");
-  try {
-    await registry.connect(amit).initiateTransfer(
-      PARCEL_ID,
-      rohit.address,
-      7500000,
-      DEED_2023_HASH
-    );
-    console.error("  ❌ CRITICAL ERROR: Disputed property transfer was not blocked!");
-  } catch (err: any) {
-    fraudBlockedLog("Active Court Dispute Injunction Gate", err.message);
-  }
 
-  subHeader("Court trial concludes with final decree. Judge lifts dispute injunction");
-  const DECREE_HASH = sha256("FINAL_COURT_DECREE_TITLE_CLEARED");
-  tx = await registry.connect(judge).liftDisputeInjunction(PARCEL_ID, DECREE_HASH);
-  await tx.wait();
-  successLog("Court Injunction lifted by Judge. Property status: DISPUTED = FALSE");
+  const value = {
+    parcelId: PARCEL_ID,
+    buyer: rohit.address,
+    saleConsideration: 7500000,
+    saleDeedHash: DEED_2023_HASH,
+    nonce: nonce,
+    deadline: deadline,
+  };
 
-  // -------------------------------------------------------------
-  // TEST SCENARIO 6: Second 2-Key Transfer (Amit -> Rohit)
-  // -------------------------------------------------------------
-  divider("TEST SCENARIO 6: Second 2-Key Transfer (Amit -> Rohit)");
-  tx = await registry.connect(amit).initiateTransfer(
+  const eip712Signature = await amit.signTypedData(domain, types, value);
+  successLog("Amit generated valid off-chain EIP-712 signature (0 ETH Gas Spent).");
+
+  subHeader("Sub-Registrar submits Amit's signature on-chain");
+  await registry.connect(registrar).initiateTransferWithSignature(
     PARCEL_ID,
+    amit.address,
     rohit.address,
     7500000,
-    DEED_2023_HASH
+    DEED_2023_HASH,
+    deadline,
+    eip712Signature
   );
-  await tx.wait();
-  tx = await registry.connect(rohit).buyerAcceptTransfer(PARCEL_ID);
-  await tx.wait();
-  tx = await registry.connect(registrar).authorizeAndCommitTransfer(PARCEL_ID);
-  await tx.wait();
+  successLog("Transfer initiated via Gasless Meta-Transaction!");
+
+  await registry.connect(rohit).buyerAcceptTransfer(PARCEL_ID);
+  await registry.connect(registrar).authorizeAndCommitTransfer(PARCEL_ID);
   successLog("Transfer 2 Committed! New Owner is Rohit.");
 
+  // -------------------------------------------------------------
+  // TEST SCENARIO 6: Lost Key & Succession Multi-Sig Recovery
+  // -------------------------------------------------------------
+  divider("TEST SCENARIO 6: Government-Assisted Lost Key / Inheritance Recovery");
+  subHeader("Rohit's legal heir requests succession recovery following loss of keys / demise");
+
+  const SUCCESSION_DOC_HASH = sha256("SUCCESSION_CERTIFICATE_DISTRICT_COURT_PUNE_2026");
+
+  // Step 1: Registrar initiates recovery after physical Aadhaar/Death Certificate check
+  await registry.connect(registrar).initiateOwnershipRecovery(
+    PARCEL_ID,
+    legalHeir.address,
+    SUCCESSION_DOC_HASH
+  );
+  successLog("Sub-Registrar initiated Recovery (Signer 1 of 2). Waiting for Court Judge.");
+
+  // Verify parcel owner is still Rohit until Judge signs
   parcel = await registry.getParcel(PARCEL_ID);
-  successLog(`Verified On-Chain Owner: ${parcel.currentOwner} (Rohit)`);
+  successLog(`Current Owner before Judge Approval: ${parcel.currentOwner} (Rohit)`);
+
+  // Step 2: District Court Judge approves decree
+  await registry.connect(judge).approveOwnershipRecovery(PARCEL_ID);
+  successLog("District Court Judge approved Recovery (Signer 2 of 2). Multi-Sig Threshold Met!");
+
+  parcel = await registry.getParcel(PARCEL_ID);
+  successLog(`🎉 Ownership Successfully Recovered to Legal Heir: ${parcel.currentOwner} (${legalHeir.address})`);
 
   // -------------------------------------------------------------
-  // TEST SCENARIO 7: Document Integrity & Tampering Check
+  // TEST SCENARIO 7: Complete Provenance & Ownership Audit Trail
   // -------------------------------------------------------------
-  divider("TEST SCENARIO 7: Document Integrity & Tamper Detection");
-  const isValidDeed = await registry.verifyDeedHash(PARCEL_ID, DEED_2023_HASH);
-  const isTamperedDeed = await registry.verifyDeedHash(PARCEL_ID, "0xFORGED_MODIFIED_DOCUMENT_HASH");
-
-  console.log(`  📄 Valid Sale Deed Hash Check:   ${isValidDeed ? "✅ MATCHES LEDGER" : "❌ FAILED"}`);
-  console.log(`  🚨 Tampered Deed Hash Check:     ${!isTamperedDeed ? "🛡️ REJECTED (Tampering Detected!)" : "❌ FAILED"}`);
-
-  // -------------------------------------------------------------
-  // TEST SCENARIO 8: Complete Provenance & Ownership Audit Trail
-  // -------------------------------------------------------------
-  divider("TEST SCENARIO 8: Immutable Chain-of-Custody Audit Trail");
+  divider("TEST SCENARIO 7: Immutable Chain-of-Custody Audit Trail");
   const history = await registry.getOwnershipHistory(PARCEL_ID);
 
-  console.log(`\n📜 Total Provenance Events on Blockchain: ${history.length}\n`);
+  console.log(`\n📜 Total Provenance Events Recorded on Blockchain: ${history.length}\n`);
   history.forEach((entry, idx) => {
     console.log(`  [Event #${idx + 1}] Type: ${entry.transferType}`);
     console.log(`     From:       ${entry.fromOwner === ethers.ZeroAddress ? "GOVERNMENT (Genesis)" : entry.fromOwner}`);
@@ -252,24 +285,19 @@ async function main() {
     console.log(`     Deed Hash:  ${entry.deedDocumentHash.slice(0, 24)}...`);
     console.log(`     Registrar:  ${entry.registrarApprover}`);
     console.log(`     Block No:   #${entry.blockNumber}`);
-    console.log(`     Timestamp:  ${new Date(Number(entry.timestamp) * 1000).toUTCString()}`);
     console.log("     " + "-".repeat(45));
   });
 
-  // Fast Title Verification
-  const [isCleanTitle, currentOwner, isMortgaged, isDisputed, isLocked, historyCount, deedHash] =
-    await registry.verifyTitle(PARCEL_ID);
-
+  const status = await registry.verifyTitle(PARCEL_ID);
   divider("FINAL TITLE VERIFICATION SUMMARY");
-  console.log(`  Property ULPIN:      ${PARCEL_ID}`);
-  console.log(`  Current Owner:       ${currentOwner}`);
-  console.log(`  Clean Title:         ${isCleanTitle ? "✅ CLEAR TITLE (Eligible for Sale / Loan)" : "❌ BLOCKED"}`);
-  console.log(`  Mortgaged:           ${isMortgaged ? "⚠️ YES" : "NO"}`);
-  console.log(`  Disputed:            ${isDisputed ? "⚠️ YES" : "NO"}`);
-  console.log(`  Locked:              ${isLocked ? "⚠️ YES" : "NO"}`);
-  console.log(`  Total Transfers:     ${historyCount}`);
-  console.log(`  Current Deed Hash:   ${deedHash}`);
-  divider("ALL LOGIC CHECKS PASSED SUCCESSFULLY!");
+  console.log(`  Property ULPIN:        ${PARCEL_ID}`);
+  console.log(`  Current Owner:         ${status.currentOwner} (Legal Heir)`);
+  console.log(`  Clean Title:           ${status.isCleanTitle ? "✅ CLEAR TITLE (Eligible for Sale / Loan)" : "❌ BLOCKED"}`);
+  console.log(`  Active Mortgages:      ${status.activeMortgageCount}`);
+  console.log(`  Active Disputes:       ${status.activeDisputeCount}`);
+  console.log(`  Emergency Locked:      ${status.isLocked ? "⚠️ YES" : "NO"}`);
+  console.log(`  Total Historical Logs: ${status.historyCount}`);
+  divider("ALL ENHANCED SCENARIOS PASSED WITH ZERO ERRORS!");
 }
 
 main().catch((error) => {

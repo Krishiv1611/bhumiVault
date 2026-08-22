@@ -1,7 +1,6 @@
 import { ethers } from "hardhat";
 import * as crypto from "crypto";
 
-// Helper function to create SHA-256 hashes simulating deed documents
 function sha256(data: string): string {
   return crypto.createHash("sha256").update(data).digest("hex");
 }
@@ -55,8 +54,8 @@ async function main() {
     "Pune",
     "Haveli",
     "Survey No. 72/1A, Baner",
-    12000, // 1200 sq meters
-    1,     // Residential
+    12000,
+    1, // Residential
     rahul.address,
     deed2010Hash,
     geoCoordsHash1
@@ -64,7 +63,7 @@ async function main() {
   await tx.wait();
 
   // Step 2: Transfer 1 (Rahul -> Amit in 2018)
-  console.log("  [Step 2] Transfer 1: Rahul -> Amit (2018) [2-Key Authorization]");
+  console.log("  [Step 2] Transfer 1: Rahul -> Amit (2018) [2-Key Authorization + Buyer Acceptance]");
   const deed2018Hash = sha256("SALE_DEED_RAHUL_TO_AMIT_PUNE_2018_CONSIDERATION_45L");
   tx = await registry.connect(rahul).initiateTransfer(parcel1Id, amit.address, 4500000, deed2018Hash);
   await tx.wait();
@@ -74,7 +73,7 @@ async function main() {
   await tx.wait();
 
   // Step 3: Transfer 2 (Amit -> Rohit in 2023)
-  console.log("  [Step 3] Transfer 2: Amit -> Rohit (2023) [2-Key Authorization]");
+  console.log("  [Step 3] Transfer 2: Amit -> Rohit (2023) [2-Key Authorization + Buyer Acceptance]");
   const deed2023Hash = sha256("SALE_DEED_AMIT_TO_ROHIT_PUNE_2023_CONSIDERATION_75L");
   tx = await registry.connect(amit).initiateTransfer(parcel1Id, rohit.address, 7500000, deed2023Hash);
   await tx.wait();

@@ -2,7 +2,7 @@
   "network": "hardhat",
   "chainId": 31337,
   "contractAddress": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-  "deployedAt": "2026-08-22T09:12:55.857Z",
+  "deployedAt": "2026-08-22T09:23:56.081Z",
   "roles": {
     "admin": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
     "registrar": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
@@ -65,7 +65,50 @@
     },
     {
       "inputs": [],
+      "name": "ECDSAInvalidSignature",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "length",
+          "type": "uint256"
+        }
+      ],
+      "name": "ECDSAInvalidSignatureLength",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "s",
+          "type": "bytes32"
+        }
+      ],
+      "name": "ECDSAInvalidSignatureS",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "InvalidShortString",
+      "type": "error"
+    },
+    {
+      "inputs": [],
       "name": "ReentrancyGuardReentrantCall",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "str",
+          "type": "string"
+        }
+      ],
+      "name": "StringTooLong",
       "type": "error"
     },
     {
@@ -76,6 +119,12 @@
           "internalType": "string",
           "name": "parcelId",
           "type": "string"
+        },
+        {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "disputeId",
+          "type": "bytes32"
         },
         {
           "indexed": false,
@@ -121,6 +170,12 @@
           "type": "string"
         },
         {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "disputeId",
+          "type": "bytes32"
+        },
+        {
           "indexed": false,
           "internalType": "string",
           "name": "judgmentDocHash",
@@ -144,12 +199,24 @@
     },
     {
       "anonymous": false,
+      "inputs": [],
+      "name": "EIP712DomainChanged",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
       "inputs": [
         {
           "indexed": true,
           "internalType": "string",
           "name": "parcelId",
           "type": "string"
+        },
+        {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "mortgageId",
+          "type": "bytes32"
         },
         {
           "indexed": false,
@@ -195,6 +262,12 @@
           "type": "string"
         },
         {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "mortgageId",
+          "type": "bytes32"
+        },
+        {
           "indexed": false,
           "internalType": "string",
           "name": "releaseDocHash",
@@ -214,6 +287,80 @@
         }
       ],
       "name": "MortgageReleased",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "string",
+          "name": "parcelId",
+          "type": "string"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "registrarApprover",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "judgeApprover",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "timestamp",
+          "type": "uint256"
+        }
+      ],
+      "name": "OwnershipRecoveryApproved",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "string",
+          "name": "parcelId",
+          "type": "string"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "currentOwner",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "proposedNewOwner",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "reasonHash",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "timestamp",
+          "type": "uint256"
+        }
+      ],
+      "name": "OwnershipRecoveryInitiated",
       "type": "event"
     },
     {
@@ -568,6 +715,12 @@
         {
           "indexed": false,
           "internalType": "uint256",
+          "name": "expiryTimestamp",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
           "name": "timestamp",
           "type": "uint256"
         }
@@ -641,6 +794,19 @@
       "type": "function"
     },
     {
+      "inputs": [],
+      "name": "TRANSFER_AUTH_TYPEHASH",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
       "inputs": [
         {
           "internalType": "string",
@@ -669,7 +835,13 @@
         }
       ],
       "name": "applyDisputeInjunction",
-      "outputs": [],
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "disputeId",
+          "type": "bytes32"
+        }
+      ],
       "stateMutability": "nonpayable",
       "type": "function"
     },
@@ -702,6 +874,25 @@
         }
       ],
       "name": "applyMortgage",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "mortgageId",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "parcelId",
+          "type": "string"
+        }
+      ],
+      "name": "approveOwnershipRecovery",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
@@ -751,6 +942,49 @@
       "type": "function"
     },
     {
+      "inputs": [],
+      "name": "eip712Domain",
+      "outputs": [
+        {
+          "internalType": "bytes1",
+          "name": "fields",
+          "type": "bytes1"
+        },
+        {
+          "internalType": "string",
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "internalType": "uint256",
+          "name": "chainId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "verifyingContract",
+          "type": "address"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "salt",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "uint256[]",
+          "name": "extensions",
+          "type": "uint256[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
       "inputs": [
         {
           "internalType": "string",
@@ -766,128 +1000,6 @@
       "name": "freezeProperty",
       "outputs": [],
       "stateMutability": "nonpayable",
-      "type": "function"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "string",
-          "name": "parcelId",
-          "type": "string"
-        }
-      ],
-      "name": "getActiveDispute",
-      "outputs": [
-        {
-          "components": [
-            {
-              "internalType": "string",
-              "name": "parcelId",
-              "type": "string"
-            },
-            {
-              "internalType": "string",
-              "name": "courtName",
-              "type": "string"
-            },
-            {
-              "internalType": "string",
-              "name": "caseNumber",
-              "type": "string"
-            },
-            {
-              "internalType": "string",
-              "name": "courtOrderHash",
-              "type": "string"
-            },
-            {
-              "internalType": "string",
-              "name": "disputeReason",
-              "type": "string"
-            },
-            {
-              "internalType": "address",
-              "name": "judgeSigner",
-              "type": "address"
-            },
-            {
-              "internalType": "uint256",
-              "name": "timestamp",
-              "type": "uint256"
-            },
-            {
-              "internalType": "bool",
-              "name": "isActive",
-              "type": "bool"
-            }
-          ],
-          "internalType": "struct BhumiVaultRegistry.DisputeRecord",
-          "name": "",
-          "type": "tuple"
-        }
-      ],
-      "stateMutability": "view",
-      "type": "function"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "string",
-          "name": "parcelId",
-          "type": "string"
-        }
-      ],
-      "name": "getActiveMortgage",
-      "outputs": [
-        {
-          "components": [
-            {
-              "internalType": "string",
-              "name": "parcelId",
-              "type": "string"
-            },
-            {
-              "internalType": "string",
-              "name": "bankName",
-              "type": "string"
-            },
-            {
-              "internalType": "string",
-              "name": "loanReferenceNumber",
-              "type": "string"
-            },
-            {
-              "internalType": "uint256",
-              "name": "loanAmount",
-              "type": "uint256"
-            },
-            {
-              "internalType": "string",
-              "name": "mortgageDocHash",
-              "type": "string"
-            },
-            {
-              "internalType": "address",
-              "name": "bankOfficer",
-              "type": "address"
-            },
-            {
-              "internalType": "uint256",
-              "name": "timestamp",
-              "type": "uint256"
-            },
-            {
-              "internalType": "bool",
-              "name": "isActive",
-              "type": "bool"
-            }
-          ],
-          "internalType": "struct BhumiVaultRegistry.MortgageRecord",
-          "name": "",
-          "type": "tuple"
-        }
-      ],
-      "stateMutability": "view",
       "type": "function"
     },
     {
@@ -954,6 +1066,11 @@
             },
             {
               "internalType": "uint256",
+              "name": "expiryTimestamp",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
               "name": "completedTimestamp",
               "type": "uint256"
             },
@@ -964,6 +1081,148 @@
             }
           ],
           "internalType": "struct BhumiVaultRegistry.TransferRequest",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "parcelId",
+          "type": "string"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "disputeId",
+          "type": "bytes32"
+        }
+      ],
+      "name": "getDispute",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "bytes32",
+              "name": "disputeId",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "string",
+              "name": "parcelId",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "courtName",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "caseNumber",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "courtOrderHash",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "disputeReason",
+              "type": "string"
+            },
+            {
+              "internalType": "address",
+              "name": "judgeSigner",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "timestamp",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bool",
+              "name": "isActive",
+              "type": "bool"
+            }
+          ],
+          "internalType": "struct BhumiVaultRegistry.DisputeRecord",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "parcelId",
+          "type": "string"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "mortgageId",
+          "type": "bytes32"
+        }
+      ],
+      "name": "getMortgage",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "bytes32",
+              "name": "mortgageId",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "string",
+              "name": "parcelId",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "bankName",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "loanReferenceNumber",
+              "type": "string"
+            },
+            {
+              "internalType": "uint256",
+              "name": "loanAmount",
+              "type": "uint256"
+            },
+            {
+              "internalType": "string",
+              "name": "mortgageDocHash",
+              "type": "string"
+            },
+            {
+              "internalType": "address",
+              "name": "bankOfficer",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "timestamp",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bool",
+              "name": "isActive",
+              "type": "bool"
+            }
+          ],
+          "internalType": "struct BhumiVaultRegistry.MortgageRecord",
           "name": "",
           "type": "tuple"
         }
@@ -1100,14 +1359,14 @@
               "type": "string"
             },
             {
-              "internalType": "bool",
-              "name": "isMortgaged",
-              "type": "bool"
+              "internalType": "uint256",
+              "name": "activeMortgagesCount",
+              "type": "uint256"
             },
             {
-              "internalType": "bool",
-              "name": "isDisputed",
-              "type": "bool"
+              "internalType": "uint256",
+              "name": "activeDisputesCount",
+              "type": "uint256"
             },
             {
               "internalType": "bool",
@@ -1141,6 +1400,25 @@
     {
       "inputs": [
         {
+          "internalType": "string",
+          "name": "parcelId",
+          "type": "string"
+        }
+      ],
+      "name": "getParcelDisputeIds",
+      "outputs": [
+        {
+          "internalType": "bytes32[]",
+          "name": "",
+          "type": "bytes32[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "uint256",
           "name": "index",
           "type": "uint256"
@@ -1152,6 +1430,96 @@
           "internalType": "string",
           "name": "",
           "type": "string"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "parcelId",
+          "type": "string"
+        }
+      ],
+      "name": "getParcelMortgageIds",
+      "outputs": [
+        {
+          "internalType": "bytes32[]",
+          "name": "",
+          "type": "bytes32[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "parcelId",
+          "type": "string"
+        }
+      ],
+      "name": "getRecoveryRequest",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "string",
+              "name": "parcelId",
+              "type": "string"
+            },
+            {
+              "internalType": "address",
+              "name": "currentRecordedOwner",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "proposedNewOwner",
+              "type": "address"
+            },
+            {
+              "internalType": "string",
+              "name": "recoveryReasonDocHash",
+              "type": "string"
+            },
+            {
+              "internalType": "bool",
+              "name": "registrarApproved",
+              "type": "bool"
+            },
+            {
+              "internalType": "bool",
+              "name": "judiciaryApproved",
+              "type": "bool"
+            },
+            {
+              "internalType": "address",
+              "name": "registrarSigner",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "judiciarySigner",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "requestedTimestamp",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bool",
+              "name": "isActive",
+              "type": "bool"
+            }
+          ],
+          "internalType": "struct BhumiVaultRegistry.OwnershipRecoveryRequest",
+          "name": "",
+          "type": "tuple"
         }
       ],
       "stateMutability": "view",
@@ -1240,6 +1608,29 @@
         },
         {
           "internalType": "address",
+          "name": "proposedNewOwner",
+          "type": "address"
+        },
+        {
+          "internalType": "string",
+          "name": "recoveryReasonDocHash",
+          "type": "string"
+        }
+      ],
+      "name": "initiateOwnershipRecovery",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "parcelId",
+          "type": "string"
+        },
+        {
+          "internalType": "address",
           "name": "buyer",
           "type": "address"
         },
@@ -1265,6 +1656,54 @@
           "internalType": "string",
           "name": "parcelId",
           "type": "string"
+        },
+        {
+          "internalType": "address",
+          "name": "seller",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "buyer",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "saleConsideration",
+          "type": "uint256"
+        },
+        {
+          "internalType": "string",
+          "name": "saleDeedHash",
+          "type": "string"
+        },
+        {
+          "internalType": "uint256",
+          "name": "deadline",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bytes",
+          "name": "sellerSignature",
+          "type": "bytes"
+        }
+      ],
+      "name": "initiateTransferWithSignature",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "parcelId",
+          "type": "string"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "disputeId",
+          "type": "bytes32"
         },
         {
           "internalType": "string",
@@ -1341,6 +1780,11 @@
           "internalType": "string",
           "name": "parcelId",
           "type": "string"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "mortgageId",
+          "type": "bytes32"
         },
         {
           "internalType": "string",
@@ -1429,6 +1873,25 @@
     {
       "inputs": [
         {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "userNonces",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "string",
           "name": "parcelId",
           "type": "string"
@@ -1461,39 +1924,56 @@
       "name": "verifyTitle",
       "outputs": [
         {
-          "internalType": "bool",
-          "name": "isCleanTitle",
-          "type": "bool"
-        },
-        {
-          "internalType": "address",
-          "name": "currentOwner",
-          "type": "address"
-        },
-        {
-          "internalType": "bool",
-          "name": "isMortgaged",
-          "type": "bool"
-        },
-        {
-          "internalType": "bool",
-          "name": "isDisputed",
-          "type": "bool"
-        },
-        {
-          "internalType": "bool",
-          "name": "isLocked",
-          "type": "bool"
-        },
-        {
-          "internalType": "uint256",
-          "name": "historyCount",
-          "type": "uint256"
-        },
-        {
-          "internalType": "string",
-          "name": "currentDeedHash",
-          "type": "string"
+          "components": [
+            {
+              "internalType": "bool",
+              "name": "isCleanTitle",
+              "type": "bool"
+            },
+            {
+              "internalType": "address",
+              "name": "currentOwner",
+              "type": "address"
+            },
+            {
+              "internalType": "bool",
+              "name": "isMortgaged",
+              "type": "bool"
+            },
+            {
+              "internalType": "bool",
+              "name": "isDisputed",
+              "type": "bool"
+            },
+            {
+              "internalType": "bool",
+              "name": "isLocked",
+              "type": "bool"
+            },
+            {
+              "internalType": "uint256",
+              "name": "activeMortgageCount",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "activeDisputeCount",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "historyCount",
+              "type": "uint256"
+            },
+            {
+              "internalType": "string",
+              "name": "currentDeedHash",
+              "type": "string"
+            }
+          ],
+          "internalType": "struct BhumiVaultRegistry.TitleVerificationStatus",
+          "name": "status",
+          "type": "tuple"
         }
       ],
       "stateMutability": "view",

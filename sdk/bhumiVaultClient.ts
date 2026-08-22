@@ -1,4 +1,4 @@
-import { ethers, Contract, JsonRpcProvider, Signer, Wallet } from "ethers";
+import { ethers, Contract, JsonRpcProvider, Signer, Wallet, TypedDataDomain, TypedDataField } from "ethers";
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
@@ -23,8 +23,8 @@ export interface LandParcelData {
   currentOwner: string;
   deedDocumentHash: string;
   boundaryCoordinatesHash: string;
-  isMortgaged: boolean;
-  isDisputed: boolean;
+  activeMortgagesCount: number;
+  activeDisputesCount: number;
   isLocked: boolean;
   exists: boolean;
   creationTimestamp: number | bigint;
@@ -42,7 +42,21 @@ export interface TransferRequestData {
   govtApproved: boolean;
   registrarApprover: string;
   initiatedTimestamp: number | bigint;
+  expiryTimestamp: number | bigint;
   completedTimestamp: number | bigint;
+  isActive: boolean;
+}
+
+export interface OwnershipRecoveryRequestData {
+  parcelId: string;
+  currentRecordedOwner: string;
+  proposedNewOwner: string;
+  recoveryReasonDocHash: string;
+  registrarApproved: boolean;
+  judiciaryApproved: boolean;
+  registrarSigner: string;
+  judiciarySigner: string;
+  requestedTimestamp: number;
   isActive: boolean;
 }
 
@@ -64,6 +78,8 @@ export interface TitleVerificationResult {
   isMortgaged: boolean;
   isDisputed: boolean;
   isLocked: boolean;
+  activeMortgageCount: number;
+  activeDisputeCount: number;
   historyCount: number;
   currentDeedHash: string;
 }
@@ -106,7 +122,7 @@ export class BhumiVaultClient {
   }
 
   /**
-   * Helper utility to compute SHA-256 hash of a file buffer or string (Sale Deed / Land Title).
+   * Helper utility to compute SHA-256 hash of a file buffer or string.
    */
   public static computeSHA256(data: Buffer | string): string {
     return crypto.createHash("sha256").update(data).digest("hex");
@@ -158,7 +174,7 @@ export class BhumiVaultClient {
   }
 
   /**
-   * Step 1: Seller initiates land transfer with attached sale deed SHA-256 hash.
+   * Step 1 (Standard): Owner initiates transfer on-chain with attached sale deed SHA-256 hash.
    */
   async initiateTransfer(
     parcelId: string,
@@ -173,6 +189,76 @@ export class BhumiVaultClient {
       buyerAddress,
       saleConsideration,
       saleDeedHash
+    );
+    return await tx.wait();
+  }
+
+  /**
+   * Generates off-chain EIP-712 signature for gasless transfer authorization (Rural citizen mode).
+   */
+  async signTransferIntent(
+    parcelId: string,
+    buyerAddress: string,
+    saleConsideration: number,
+    saleDeedHash: string,
+    sellerWallet: Wallet,
+    deadline: number
+  ): Promise<string> {
+    const network = await this.provider.getNetwork();
+    const domain: TypedDataDomain = {
+      name: "BhumiVaultRegistry",
+      version: "1.0.0",
+      chainId: Number(network.chainId),
+      verifyingContract: this.contractAddress,
+    };
+
+    const types: Record<string, TypedDataField[]> = {
+      TransferAuthorization: [
+        { name: "parcelId", type: "string" },
+        { name: "buyer", type: "address" },
+        { name: "saleConsideration", type: "uint256" },
+        { name: "saleDeedHash", type: "string" },
+        { name: "nonce", type: "uint256" },
+        { name: "deadline", type: "uint256" },
+      ],
+    };
+
+    const nonce = await (this.contract as any).userNonces(sellerWallet.address);
+
+    const value = {
+      parcelId,
+      buyer: buyerAddress,
+      saleConsideration,
+      saleDeedHash,
+      nonce: Number(nonce),
+      deadline,
+    };
+
+    return await sellerWallet.signTypedData(domain, types, value);
+  }
+
+  /**
+   * Step 1 (Gasless Relayer): Submits owner's off-chain EIP-712 signature.
+   */
+  async initiateTransferWithSignature(
+    parcelId: string,
+    sellerAddress: string,
+    buyerAddress: string,
+    saleConsideration: number,
+    saleDeedHash: string,
+    deadline: number,
+    sellerSignature: string,
+    relayerSigner: Signer
+  ): Promise<ethers.ContractTransactionReceipt | null> {
+    const contractWithSigner = this.contract.connect(relayerSigner) as any;
+    const tx = await contractWithSigner.initiateTransferWithSignature(
+      parcelId,
+      sellerAddress,
+      buyerAddress,
+      saleConsideration,
+      saleDeedHash,
+      deadline,
+      sellerSignature
     );
     return await tx.wait();
   }
@@ -224,7 +310,7 @@ export class BhumiVaultClient {
     loanAmount: number,
     mortgageDocHash: string,
     bankSigner: Signer
-  ): Promise<ethers.ContractTransactionReceipt | null> {
+  ): Promise<string> {
     const contractWithSigner = this.contract.connect(bankSigner) as any;
     const tx = await contractWithSigner.applyMortgage(
       parcelId,
@@ -233,7 +319,21 @@ export class BhumiVaultClient {
       loanAmount,
       mortgageDocHash
     );
-    return await tx.wait();
+    const receipt = await tx.wait();
+    // Parse MortgageApplied event
+    const event = receipt.logs.find((log: any) => {
+      try {
+        const parsed = this.contract.interface.parseLog(log);
+        return parsed?.name === "MortgageApplied";
+      } catch {
+        return false;
+      }
+    });
+    if (event) {
+      const parsed = this.contract.interface.parseLog(event);
+      return parsed?.args.mortgageId;
+    }
+    return "";
   }
 
   /**
@@ -241,11 +341,12 @@ export class BhumiVaultClient {
    */
   async releaseMortgage(
     parcelId: string,
+    mortgageId: string,
     releaseDocHash: string,
     bankSigner: Signer
   ): Promise<ethers.ContractTransactionReceipt | null> {
     const contractWithSigner = this.contract.connect(bankSigner) as any;
-    const tx = await contractWithSigner.releaseMortgage(parcelId, releaseDocHash);
+    const tx = await contractWithSigner.releaseMortgage(parcelId, mortgageId, releaseDocHash);
     return await tx.wait();
   }
 
@@ -259,7 +360,7 @@ export class BhumiVaultClient {
     courtOrderHash: string,
     reason: string,
     judgeSigner: Signer
-  ): Promise<ethers.ContractTransactionReceipt | null> {
+  ): Promise<string> {
     const contractWithSigner = this.contract.connect(judgeSigner) as any;
     const tx = await contractWithSigner.applyDisputeInjunction(
       parcelId,
@@ -268,7 +369,20 @@ export class BhumiVaultClient {
       courtOrderHash,
       reason
     );
-    return await tx.wait();
+    const receipt = await tx.wait();
+    const event = receipt.logs.find((log: any) => {
+      try {
+        const parsed = this.contract.interface.parseLog(log);
+        return parsed?.name === "DisputeInjunctionApplied";
+      } catch {
+        return false;
+      }
+    });
+    if (event) {
+      const parsed = this.contract.interface.parseLog(event);
+      return parsed?.args.disputeId;
+    }
+    return "";
   }
 
   /**
@@ -276,11 +390,42 @@ export class BhumiVaultClient {
    */
   async liftDisputeInjunction(
     parcelId: string,
+    disputeId: string,
     judgmentDocHash: string,
     judgeSigner: Signer
   ): Promise<ethers.ContractTransactionReceipt | null> {
     const contractWithSigner = this.contract.connect(judgeSigner) as any;
-    const tx = await contractWithSigner.liftDisputeInjunction(parcelId, judgmentDocHash);
+    const tx = await contractWithSigner.liftDisputeInjunction(parcelId, disputeId, judgmentDocHash);
+    return await tx.wait();
+  }
+
+  /**
+   * Initiate Government-Assisted Lost Key / Inheritance Recovery (Registrar or Court).
+   */
+  async initiateOwnershipRecovery(
+    parcelId: string,
+    proposedNewOwner: string,
+    recoveryReasonDocHash: string,
+    initiatorSigner: Signer
+  ): Promise<ethers.ContractTransactionReceipt | null> {
+    const contractWithSigner = this.contract.connect(initiatorSigner) as any;
+    const tx = await contractWithSigner.initiateOwnershipRecovery(
+      parcelId,
+      proposedNewOwner,
+      recoveryReasonDocHash
+    );
+    return await tx.wait();
+  }
+
+  /**
+   * Approve Government-Assisted Recovery (Sub-Registrar or Court Judge).
+   */
+  async approveOwnershipRecovery(
+    parcelId: string,
+    approverSigner: Signer
+  ): Promise<ethers.ContractTransactionReceipt | null> {
+    const contractWithSigner = this.contract.connect(approverSigner) as any;
+    const tx = await contractWithSigner.approveOwnershipRecovery(parcelId);
     return await tx.wait();
   }
 
@@ -288,9 +433,6 @@ export class BhumiVaultClient {
   // READ / VERIFICATION QUERIES
   // -------------------------------------------------------------
 
-  /**
-   * Get complete details of a registered land parcel.
-   */
   async getParcel(parcelId: string): Promise<LandParcelData> {
     const p = await (this.contract as any).getParcel(parcelId);
     return {
@@ -304,8 +446,8 @@ export class BhumiVaultClient {
       currentOwner: p.currentOwner,
       deedDocumentHash: p.deedDocumentHash,
       boundaryCoordinatesHash: p.boundaryCoordinatesHash,
-      isMortgaged: p.isMortgaged,
-      isDisputed: p.isDisputed,
+      activeMortgagesCount: Number(p.activeMortgagesCount),
+      activeDisputesCount: Number(p.activeDisputesCount),
       isLocked: p.isLocked,
       exists: p.exists,
       creationTimestamp: Number(p.creationTimestamp),
@@ -313,9 +455,6 @@ export class BhumiVaultClient {
     };
   }
 
-  /**
-   * Get full chronological ownership chain of title.
-   */
   async getOwnershipHistory(parcelId: string): Promise<OwnershipHistoryData[]> {
     const entries = await (this.contract as any).getOwnershipHistory(parcelId);
     return entries.map((e: any) => ({
@@ -331,32 +470,25 @@ export class BhumiVaultClient {
     }));
   }
 
-  /**
-   * Fast public title verification (checks clean title, mortgage, dispute, freeze).
-   */
   async verifyTitle(parcelId: string): Promise<TitleVerificationResult> {
-    const result = await (this.contract as any).verifyTitle(parcelId);
+    const res = await (this.contract as any).verifyTitle(parcelId);
     return {
-      isCleanTitle: result[0],
-      currentOwner: result[1],
-      isMortgaged: result[2],
-      isDisputed: result[3],
-      isLocked: result[4],
-      historyCount: Number(result[5]),
-      currentDeedHash: result[6],
+      isCleanTitle: res.isCleanTitle,
+      currentOwner: res.currentOwner,
+      isMortgaged: res.isMortgaged,
+      isDisputed: res.isDisputed,
+      isLocked: res.isLocked,
+      activeMortgageCount: Number(res.activeMortgageCount),
+      activeDisputeCount: Number(res.activeDisputeCount),
+      historyCount: Number(res.historyCount),
+      currentDeedHash: res.currentDeedHash,
     };
   }
 
-  /**
-   * Verify if a document hash matches the recorded title deed.
-   */
   async verifyDeedHash(parcelId: string, testHash: string): Promise<boolean> {
     return await (this.contract as any).verifyDeedHash(parcelId, testHash);
   }
 
-  /**
-   * Get active transfer request details.
-   */
   async getActiveTransfer(parcelId: string): Promise<TransferRequestData | null> {
     const req = await (this.contract as any).getActiveTransfer(parcelId);
     if (!req.isActive) return null;
@@ -371,7 +503,25 @@ export class BhumiVaultClient {
       govtApproved: req.govtApproved,
       registrarApprover: req.registrarApprover,
       initiatedTimestamp: Number(req.initiatedTimestamp),
+      expiryTimestamp: Number(req.expiryTimestamp),
       completedTimestamp: Number(req.completedTimestamp),
+      isActive: req.isActive,
+    };
+  }
+
+  async getRecoveryRequest(parcelId: string): Promise<OwnershipRecoveryRequestData | null> {
+    const req = await (this.contract as any).getRecoveryRequest(parcelId);
+    if (!req.isActive) return null;
+    return {
+      parcelId: req.parcelId,
+      currentRecordedOwner: req.currentRecordedOwner,
+      proposedNewOwner: req.proposedNewOwner,
+      recoveryReasonDocHash: req.recoveryReasonDocHash,
+      registrarApproved: req.registrarApproved,
+      judiciaryApproved: req.judiciaryApproved,
+      registrarSigner: req.registrarSigner,
+      judiciarySigner: req.judiciarySigner,
+      requestedTimestamp: Number(req.requestedTimestamp),
       isActive: req.isActive,
     };
   }

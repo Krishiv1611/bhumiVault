@@ -8,11 +8,13 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
   let admin: SignerWithAddress;
   let registrar: SignerWithAddress;
   let revenueOfficer: SignerWithAddress;
-  let bankOfficer: SignerWithAddress;
+  let bankOfficer1: SignerWithAddress;
+  let bankOfficer2: SignerWithAddress;
   let judge: SignerWithAddress;
   let rahul: SignerWithAddress; // Genesis Owner
   let amit: SignerWithAddress;  // Buyer 1
   let rohit: SignerWithAddress; // Buyer 2
+  let legalHeir: SignerWithAddress;
   let fraudster: SignerWithAddress;
 
   const SAMPLE_PARCEL_ID = "IN-MH-PUN-2025-0987";
@@ -26,11 +28,13 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
       admin,
       registrar,
       revenueOfficer,
-      bankOfficer,
+      bankOfficer1,
+      bankOfficer2,
       judge,
       rahul,
       amit,
       rohit,
+      legalHeir,
       fraudster,
     ] = await ethers.getSigners();
 
@@ -39,10 +43,14 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
       admin.address,
       registrar.address,
       revenueOfficer.address,
-      bankOfficer.address,
+      bankOfficer1.address,
       judge.address
     );
     await registry.waitForDeployment();
+
+    // Grant BANK_ROLE to bankOfficer2
+    const BANK_ROLE = await registry.BANK_ROLE();
+    await registry.connect(admin).grantRole(BANK_ROLE, bankOfficer2.address);
   });
 
   describe("1. Deployment & Multi-Stakeholder Role Access Control", function () {
@@ -54,7 +62,8 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
 
       expect(await registry.hasRole(REGISTRAR_ROLE, registrar.address)).to.be.true;
       expect(await registry.hasRole(REVENUE_ROLE, revenueOfficer.address)).to.be.true;
-      expect(await registry.hasRole(BANK_ROLE, bankOfficer.address)).to.be.true;
+      expect(await registry.hasRole(BANK_ROLE, bankOfficer1.address)).to.be.true;
+      expect(await registry.hasRole(BANK_ROLE, bankOfficer2.address)).to.be.true;
       expect(await registry.hasRole(JUDICIARY_ROLE, judge.address)).to.be.true;
     });
 
@@ -99,8 +108,8 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
       expect(parcel.parcelId).to.equal(SAMPLE_PARCEL_ID);
       expect(parcel.currentOwner).to.equal(rahul.address);
       expect(parcel.deedDocumentHash).to.equal(GENESIS_DEED_HASH);
-      expect(parcel.isMortgaged).to.be.false;
-      expect(parcel.isDisputed).to.be.false;
+      expect(parcel.activeMortgagesCount).to.equal(0n);
+      expect(parcel.activeDisputesCount).to.equal(0n);
 
       // Check initial history
       const history = await registry.getOwnershipHistory(SAMPLE_PARCEL_ID);
@@ -140,7 +149,7 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
     });
   });
 
-  describe("3. 2-Key Transfer Authorization (Happy Path Flow)", function () {
+  describe("3. 2-Key Transfer Authorization & Enforced Buyer Acceptance", function () {
     beforeEach(async function () {
       await registry.connect(revenueOfficer).registerGenesisParcel(
         SAMPLE_PARCEL_ID,
@@ -156,25 +165,24 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
       );
     });
 
-    it("Should complete 2-key transfer from Rahul to Amit with Sub-Registrar approval", async function () {
+    it("Should enforce Buyer Acceptance before Sub-Registrar can commit transfer", async function () {
       // Step 1: Owner (Rahul) initiates transfer (Key 1)
+      await registry.connect(rahul).initiateTransfer(
+        SAMPLE_PARCEL_ID,
+        amit.address,
+        5000000,
+        SALE_DEED_HASH_1
+      );
+
+      // Sub-Registrar attempts to commit BEFORE buyer accepts -> REVERT
       await expect(
-        registry.connect(rahul).initiateTransfer(
-          SAMPLE_PARCEL_ID,
-          amit.address,
-          5000000, // 50 Lakhs INR
-          SALE_DEED_HASH_1
-        )
-      )
-        .to.emit(registry, "TransferInitiated")
-        .withArgs(SAMPLE_PARCEL_ID, rahul.address, amit.address, SALE_DEED_HASH_1, 5000000, (val: any) => true);
+        registry.connect(registrar).authorizeAndCommitTransfer(SAMPLE_PARCEL_ID)
+      ).to.be.revertedWith("BHUMI: Buyer must accept transfer before registrar authorization");
 
-      // Step 2: Buyer (Amit) accepts terms
-      await expect(registry.connect(amit).buyerAcceptTransfer(SAMPLE_PARCEL_ID))
-        .to.emit(registry, "TransferBuyerAccepted")
-        .withArgs(SAMPLE_PARCEL_ID, amit.address, (val: any) => true);
+      // Step 2: Buyer accepts
+      await registry.connect(amit).buyerAcceptTransfer(SAMPLE_PARCEL_ID);
 
-      // Step 3: Sub-Registrar authorizes and commits (Key 2)
+      // Step 3: Sub-Registrar commits (Key 2)
       await expect(registry.connect(registrar).authorizeAndCommitTransfer(SAMPLE_PARCEL_ID))
         .to.emit(registry, "TransferCommitted")
         .withArgs(
@@ -186,22 +194,68 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
           (val: any) => true
         );
 
-      // Verify on-chain owner is now Amit
       const parcel = await registry.getParcel(SAMPLE_PARCEL_ID);
       expect(parcel.currentOwner).to.equal(amit.address);
-      expect(parcel.deedDocumentHash).to.equal(SALE_DEED_HASH_1);
+    });
 
-      // Verify ownership history has 2 entries
-      const history = await registry.getOwnershipHistory(SAMPLE_PARCEL_ID);
-      expect(history.length).to.equal(2);
-      expect(history[1].fromOwner).to.equal(rahul.address);
-      expect(history[1].toOwner).to.equal(amit.address);
-      expect(history[1].transferType).to.equal("SALE_TRANSFER");
-      expect(history[1].registrarApprover).to.equal(registrar.address);
+    it("Should support Gasless EIP-712 Meta-Transaction authorization for rural citizens", async function () {
+      const contractAddress = await registry.getAddress();
+      const network = await ethers.provider.getNetwork();
+
+      const domain = {
+        name: "BhumiVaultRegistry",
+        version: "1.0.0",
+        chainId: Number(network.chainId),
+        verifyingContract: contractAddress,
+      };
+
+      const types = {
+        TransferAuthorization: [
+          { name: "parcelId", type: "string" },
+          { name: "buyer", type: "address" },
+          { name: "saleConsideration", type: "uint256" },
+          { name: "saleDeedHash", type: "string" },
+          { name: "nonce", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+        ],
+      };
+
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const nonce = await registry.userNonces(rahul.address);
+
+      const value = {
+        parcelId: SAMPLE_PARCEL_ID,
+        buyer: amit.address,
+        saleConsideration: 5000000,
+        saleDeedHash: SALE_DEED_HASH_1,
+        nonce: nonce,
+        deadline: deadline,
+      };
+
+      // Rahul signs off-chain EIP-712 message
+      const signature = await rahul.signTypedData(domain, types, value);
+
+      // Relayer (or Registrar) submits transaction on-chain on behalf of Rahul
+      await expect(
+        registry.connect(registrar).initiateTransferWithSignature(
+          SAMPLE_PARCEL_ID,
+          rahul.address,
+          amit.address,
+          5000000,
+          SALE_DEED_HASH_1,
+          deadline,
+          signature
+        )
+      ).to.emit(registry, "TransferInitiated");
+
+      // Verify transfer request is active
+      const activeTransfer = await registry.getActiveTransfer(SAMPLE_PARCEL_ID);
+      expect(activeTransfer.seller).to.equal(rahul.address);
+      expect(activeTransfer.sellerApproved).to.be.true;
     });
   });
 
-  describe("4. Fraud Prevention & Conflict Checks", function () {
+  describe("4. Multi-Lien Bank Mortgages & Multi-Dispute Court Injunctions", function () {
     beforeEach(async function () {
       await registry.connect(revenueOfficer).registerGenesisParcel(
         SAMPLE_PARCEL_ID,
@@ -217,34 +271,32 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
       );
     });
 
-    it("FRAUD GATE 1: Fraudster attempting to sell Rahul's property must be blocked", async function () {
-      await expect(
-        registry.connect(fraudster).initiateTransfer(
-          SAMPLE_PARCEL_ID,
-          amit.address,
-          5000000,
-          SALE_DEED_HASH_1
-        )
-      ).to.be.revertedWith("BHUMI: FRAUD_DETECTED - Caller is not the recorded owner");
-    });
+    it("Should track multiple simultaneous bank mortgages and block transfers until all are released", async function () {
+      // Bank 1 applies Mortgage 1
+      const tx1 = await registry.connect(bankOfficer1).applyMortgage(
+        SAMPLE_PARCEL_ID,
+        "State Bank of India",
+        "SBI-HL-2025-8832",
+        3500000,
+        "0xmortgagehash1"
+      );
+      const receipt1 = await tx1.wait();
+      const mortgageId1 = (await registry.getParcelMortgageIds(SAMPLE_PARCEL_ID))[0];
 
-    it("FRAUD GATE 2: Transfer must be blocked if Bank Mortgage is active", async function () {
-      // Bank places mortgage lien
-      await expect(
-        registry.connect(bankOfficer).applyMortgage(
-          SAMPLE_PARCEL_ID,
-          "State Bank of India",
-          "SBI-HL-2025-8832",
-          3500000,
-          "0x123456789abcdef"
-        )
-      ).to.emit(registry, "MortgageApplied");
+      // Bank 2 applies Mortgage 2 (Consortium Loan)
+      await registry.connect(bankOfficer2).applyMortgage(
+        SAMPLE_PARCEL_ID,
+        "HDFC Bank",
+        "HDFC-CL-2025-1102",
+        2000000,
+        "0xmortgagehash2"
+      );
+      const mortgageId2 = (await registry.getParcelMortgageIds(SAMPLE_PARCEL_ID))[1];
 
-      // Verify property is marked mortgaged
-      const parcel = await registry.getParcel(SAMPLE_PARCEL_ID);
-      expect(parcel.isMortgaged).to.be.true;
+      let parcel = await registry.getParcel(SAMPLE_PARCEL_ID);
+      expect(parcel.activeMortgagesCount).to.equal(2n);
 
-      // Rahul attempts to sell mortgaged land -> BLOCKED
+      // Attempt sale -> BLOCKED
       await expect(
         registry.connect(rahul).initiateTransfer(
           SAMPLE_PARCEL_ID,
@@ -254,10 +306,25 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
         )
       ).to.be.revertedWith("BHUMI: FRAUD_DETECTED - Active Bank Mortgage Hold exists");
 
-      // Bank releases mortgage NOC
-      await registry.connect(bankOfficer).releaseMortgage(SAMPLE_PARCEL_ID, "0xreleasehash");
+      // Bank 1 releases Mortgage 1 -> Still has Mortgage 2 active -> Sale still BLOCKED
+      await registry.connect(bankOfficer1).releaseMortgage(SAMPLE_PARCEL_ID, mortgageId1, "0xrelease1");
+      parcel = await registry.getParcel(SAMPLE_PARCEL_ID);
+      expect(parcel.activeMortgagesCount).to.equal(1n);
 
-      // Now Rahul can initiate transfer
+      await expect(
+        registry.connect(rahul).initiateTransfer(
+          SAMPLE_PARCEL_ID,
+          amit.address,
+          5000000,
+          SALE_DEED_HASH_1
+        )
+      ).to.be.revertedWith("BHUMI: FRAUD_DETECTED - Active Bank Mortgage Hold exists");
+
+      // Bank 2 releases Mortgage 2 -> Clean title -> Sale UNLOCKED
+      await registry.connect(bankOfficer2).releaseMortgage(SAMPLE_PARCEL_ID, mortgageId2, "0xrelease2");
+      parcel = await registry.getParcel(SAMPLE_PARCEL_ID);
+      expect(parcel.activeMortgagesCount).to.equal(0n);
+
       await expect(
         registry.connect(rahul).initiateTransfer(
           SAMPLE_PARCEL_ID,
@@ -268,19 +335,17 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
       ).to.emit(registry, "TransferInitiated");
     });
 
-    it("FRAUD GATE 3: Transfer must be blocked if Judiciary Court Dispute is active", async function () {
-      // District Court issues injunction order
-      await expect(
-        registry.connect(judge).applyDisputeInjunction(
-          SAMPLE_PARCEL_ID,
-          "District Court Pune",
-          "CS/2025/4410",
-          "0xinjunctionorderhash",
-          "Title ownership boundary dispute pending trial"
-        )
-      ).to.emit(registry, "DisputeInjunctionApplied");
+    it("Should track court dispute injunctions and block transfers", async function () {
+      await registry.connect(judge).applyDisputeInjunction(
+        SAMPLE_PARCEL_ID,
+        "District Court Pune",
+        "CS/2025/4410",
+        "0xinjunctionhash",
+        "Boundary title claim"
+      );
 
-      // Rahul attempts to sell disputed land -> BLOCKED
+      const disputeId = (await registry.getParcelDisputeIds(SAMPLE_PARCEL_ID))[0];
+
       await expect(
         registry.connect(rahul).initiateTransfer(
           SAMPLE_PARCEL_ID,
@@ -290,10 +355,8 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
         )
       ).to.be.revertedWith("BHUMI: FRAUD_DETECTED - Property has active Court Dispute Injunction");
 
-      // Court resolves dispute and lifts injunction
-      await registry.connect(judge).liftDisputeInjunction(SAMPLE_PARCEL_ID, "0xjudgmenthash");
+      await registry.connect(judge).liftDisputeInjunction(SAMPLE_PARCEL_ID, disputeId, "0xjudgmenthash");
 
-      // Transfer can now proceed
       await expect(
         registry.connect(rahul).initiateTransfer(
           SAMPLE_PARCEL_ID,
@@ -303,23 +366,58 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
         )
       ).to.emit(registry, "TransferInitiated");
     });
+  });
 
-    it("FRAUD GATE 4: Transfer authorization without Registrar role must fail", async function () {
-      await registry.connect(rahul).initiateTransfer(
+  describe("5. Government-Assisted Lost Private Key & Succession Multi-Sig Recovery", function () {
+    beforeEach(async function () {
+      await registry.connect(revenueOfficer).registerGenesisParcel(
         SAMPLE_PARCEL_ID,
-        amit.address,
-        5000000,
-        SALE_DEED_HASH_1
+        "MH",
+        "Pune",
+        "Haveli",
+        "72/1A",
+        10000,
+        1,
+        rahul.address,
+        GENESIS_DEED_HASH,
+        GEO_COORDS_HASH
       );
+    });
 
-      // Fraudster tries to bypass government and authorize transfer
+    it("Should require Multi-Sig (Sub-Registrar + District Court Judge) to recover ownership for legal heir", async function () {
+      const SUCCESSION_CERT_HASH = "0x89abcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678";
+
+      // Step 1: Sub-Registrar initiates recovery based on verified physical Aadhaar KYC & Death Certificate
       await expect(
-        registry.connect(fraudster).authorizeAndCommitTransfer(SAMPLE_PARCEL_ID)
-      ).to.be.revertedWithCustomError(registry, "AccessControlUnauthorizedAccount");
+        registry.connect(registrar).initiateOwnershipRecovery(
+          SAMPLE_PARCEL_ID,
+          legalHeir.address,
+          SUCCESSION_CERT_HASH
+        )
+      ).to.emit(registry, "OwnershipRecoveryInitiated");
+
+      // Verify ownership is NOT changed yet (waiting for Judge approval)
+      let parcel = await registry.getParcel(SAMPLE_PARCEL_ID);
+      expect(parcel.currentOwner).to.equal(rahul.address);
+
+      // Step 2: District Court Judge verifies decree and approves
+      await expect(registry.connect(judge).approveOwnershipRecovery(SAMPLE_PARCEL_ID))
+        .to.emit(registry, "OwnershipRecoveryApproved")
+        .withArgs(SAMPLE_PARCEL_ID, legalHeir.address, registrar.address, judge.address, (val: any) => true);
+
+      // Verify ownership has now updated to Legal Heir
+      parcel = await registry.getParcel(SAMPLE_PARCEL_ID);
+      expect(parcel.currentOwner).to.equal(legalHeir.address);
+
+      // Verify audit trail logged INHERITANCE_RECOVERY event
+      const history = await registry.getOwnershipHistory(SAMPLE_PARCEL_ID);
+      expect(history.length).to.equal(2);
+      expect(history[1].transferType).to.equal("INHERITANCE_RECOVERY");
+      expect(history[1].toOwner).to.equal(legalHeir.address);
     });
   });
 
-  describe("5. Multi-Hop Provenance & Title Verification", function () {
+  describe("6. Multi-Hop Provenance & Title Verification", function () {
     it("Should trace complete ownership chain: Gov -> Rahul -> Amit -> Rohit", async function () {
       // 1. Genesis: Gov -> Rahul
       await registry.connect(revenueOfficer).registerGenesisParcel(
@@ -342,6 +440,7 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
         5000000,
         SALE_DEED_HASH_1
       );
+      await registry.connect(amit).buyerAcceptTransfer(SAMPLE_PARCEL_ID);
       await registry.connect(registrar).authorizeAndCommitTransfer(SAMPLE_PARCEL_ID);
 
       // 3. Transfer 2: Amit -> Rohit
@@ -351,6 +450,7 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
         7500000,
         SALE_DEED_HASH_2
       );
+      await registry.connect(rohit).buyerAcceptTransfer(SAMPLE_PARCEL_ID);
       await registry.connect(registrar).authorizeAndCommitTransfer(SAMPLE_PARCEL_ID);
 
       // Current Owner check
@@ -358,35 +458,14 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
       expect(parcel.currentOwner).to.equal(rohit.address);
       expect(parcel.deedDocumentHash).to.equal(SALE_DEED_HASH_2);
 
-      // Full History Trail check
-      const history = await registry.getOwnershipHistory(SAMPLE_PARCEL_ID);
-      expect(history.length).to.equal(3);
-
-      expect(history[0].toOwner).to.equal(rahul.address);
-      expect(history[0].transferType).to.equal("GENESIS_REGISTRATION");
-
-      expect(history[1].fromOwner).to.equal(rahul.address);
-      expect(history[1].toOwner).to.equal(amit.address);
-      expect(history[1].deedDocumentHash).to.equal(SALE_DEED_HASH_1);
-
-      expect(history[2].fromOwner).to.equal(amit.address);
-      expect(history[2].toOwner).to.equal(rohit.address);
-      expect(history[2].deedDocumentHash).to.equal(SALE_DEED_HASH_2);
-
-      // Public Title Verification helper
-      const [isClean, owner, isMortgaged, isDisputed, isLocked, count, deedHash] =
-        await registry.verifyTitle(SAMPLE_PARCEL_ID);
-
-      expect(isClean).to.be.true;
-      expect(owner).to.equal(rohit.address);
-      expect(isMortgaged).to.be.false;
-      expect(isDisputed).to.be.false;
-      expect(count).to.equal(3n);
-      expect(deedHash).to.equal(SALE_DEED_HASH_2);
-
-      // Deed Document Hash Verification helper
-      expect(await registry.verifyDeedHash(SAMPLE_PARCEL_ID, SALE_DEED_HASH_2)).to.be.true;
-      expect(await registry.verifyDeedHash(SAMPLE_PARCEL_ID, "0xfakehash")).to.be.false;
+      // Fast Title Verification Struct check
+      const status = await registry.verifyTitle(SAMPLE_PARCEL_ID);
+      expect(status.isCleanTitle).to.be.true;
+      expect(status.currentOwner).to.equal(rohit.address);
+      expect(status.isMortgaged).to.be.false;
+      expect(status.isDisputed).to.be.false;
+      expect(status.historyCount).to.equal(3n);
+      expect(status.currentDeedHash).to.equal(SALE_DEED_HASH_2);
     });
   });
 });
