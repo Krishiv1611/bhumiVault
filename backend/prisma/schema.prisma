@@ -1,0 +1,258 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  REGISTRAR
+  REVENUE
+  BANK
+  JUDICIARY
+  CITIZEN
+}
+
+enum LandType {
+  AGRICULTURAL
+  RESIDENTIAL
+  COMMERCIAL
+  INDUSTRIAL
+  GOVERNMENT_RESERVED
+}
+
+enum DocumentPurpose {
+  SALE_DEED
+  GENESIS_DEED
+  MORTGAGE_DOC
+  MORTGAGE_NOC
+  COURT_ORDER
+  COURT_JUDGMENT
+  RECOVERY_DOC
+  SUCCESSION_CERTIFICATE
+  CADASTRAL_MAP
+  IDENTITY_PROOF
+  OTHER
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  passwordHash  String
+  fullName      String
+  phone         String?
+  aadhaarHash   String?
+  walletAddress String?   @unique
+  role          Role      @default(CITIZEN)
+  organization  String?   // e.g. "State Bank of India", "Sub-Registrar Office Pune", "District Court"
+  designation   String?   // e.g. "Chief Sub-Registrar", "Loan Officer", "District Judge"
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  ownedParcels  LandParcel[]   @relation("UserOwnedParcels")
+  documents     Document[]     @relation("UserUploadedDocuments")
+  activityLogs  ActivityLog[]  @relation("UserActivityLogs")
+
+  @@index([role])
+  @@index([walletAddress])
+}
+
+model LandParcel {
+  id                      String     @id @default(uuid())
+  parcelId                String     @unique // ULPIN (e.g. IN-MH-PUN-2025-0987)
+  stateCode               String     // MH, KA, etc.
+  district                String
+  taluk                   String
+  surveyNumber            String
+  areaSqMeters            Float
+  landType                LandType   @default(RESIDENTIAL)
+  currentOwnerAddress     String
+  currentOwnerUserId      String?
+  deedDocumentHash        String
+  boundaryCoordinatesHash String
+  activeMortgagesCount    Int        @default(0)
+  activeDisputesCount     Int        @default(0)
+  isLocked                Boolean    @default(false)
+  exists                  Boolean    @default(true)
+  creationTimestamp       BigInt     @default(0)
+  lastUpdatedTimestamp    BigInt     @default(0)
+  createdAt               DateTime   @default(now())
+  updatedAt               DateTime   @updatedAt
+
+  // Relations
+  currentOwnerUser        User?               @relation("UserOwnedParcels", fields: [currentOwnerUserId], references: [id])
+  history                 OwnershipHistory[]
+  transferRequests        TransferRequest[]
+  mortgages               MortgageRecord[]
+  disputes                DisputeRecord[]
+  recoveryRequests        RecoveryRequest[]
+  documents               Document[]
+
+  @@index([district])
+  @@index([stateCode])
+  @@index([currentOwnerAddress])
+  @@index([landType])
+  @@index([isLocked])
+}
+
+model OwnershipHistory {
+  id                       String     @id @default(uuid())
+  parcelId                 String
+  historyIndex             Int
+  fromOwnerAddress         String
+  toOwnerAddress           String
+  transferType             String     // GENESIS_REGISTRATION, SALE_TRANSFER, INHERITANCE_RECOVERY
+  deedDocumentHash         String
+  registrarApproverAddress String
+  timestamp                BigInt
+  blockNumber              BigInt
+  createdAt                DateTime   @default(now())
+
+  parcel                   LandParcel @relation(fields: [parcelId], references: [parcelId], onDelete: Cascade)
+
+  @@unique([parcelId, historyIndex])
+  @@index([parcelId])
+  @@index([toOwnerAddress])
+}
+
+model TransferRequest {
+  id                       String     @id @default(uuid())
+  parcelId                 String
+  sellerAddress            String
+  buyerAddress             String
+  saleConsideration        Float
+  saleDeedHash             String
+  sellerApproved           Boolean    @default(true)
+  buyerAccepted            Boolean    @default(false)
+  govtApproved             Boolean    @default(false)
+  registrarApproverAddress String?
+  initiatedTimestamp       BigInt
+  expiryTimestamp          BigInt
+  completedTimestamp       BigInt     @default(0)
+  isActive                 Boolean    @default(true)
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+
+  parcel                   LandParcel @relation(fields: [parcelId], references: [parcelId], onDelete: Cascade)
+
+  @@index([parcelId])
+  @@index([sellerAddress])
+  @@index([buyerAddress])
+  @@index([isActive])
+}
+
+model MortgageRecord {
+  id                 String     @id @default(uuid())
+  mortgageIdOnChain  String     // bytes32 hex string
+  parcelId           String
+  bankName           String
+  loanReferenceNumber String
+  loanAmount         Float
+  mortgageDocHash    String
+  bankOfficerAddress String
+  isActive           Boolean    @default(true)
+  timestamp          BigInt
+  releaseDocHash     String?
+  releasedTimestamp  BigInt?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  parcel             LandParcel @relation(fields: [parcelId], references: [parcelId], onDelete: Cascade)
+
+  @@unique([parcelId, mortgageIdOnChain])
+  @@index([parcelId])
+  @@index([bankName])
+  @@index([isActive])
+}
+
+model DisputeRecord {
+  id                 String     @id @default(uuid())
+  disputeIdOnChain   String     // bytes32 hex string
+  parcelId           String
+  courtName          String
+  caseNumber         String
+  courtOrderHash     String
+  disputeReason      String
+  judgeSignerAddress String
+  isActive           Boolean    @default(true)
+  timestamp          BigInt
+  judgmentDocHash    String?
+  liftedTimestamp    BigInt?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  parcel             LandParcel @relation(fields: [parcelId], references: [parcelId], onDelete: Cascade)
+
+  @@unique([parcelId, disputeIdOnChain])
+  @@index([parcelId])
+  @@index([caseNumber])
+  @@index([isActive])
+}
+
+model RecoveryRequest {
+  id                          String     @id @default(uuid())
+  parcelId                    String
+  currentRecordedOwnerAddress String
+  proposedNewOwnerAddress     String
+  recoveryReasonDocHash       String
+  registrarApproved           Boolean    @default(false)
+  judiciaryApproved           Boolean    @default(false)
+  registrarSignerAddress      String?
+  judiciarySignerAddress      String?
+  requestedTimestamp          BigInt
+  challengeEndTime            BigInt     @default(0)
+  isFinalized                 Boolean    @default(false)
+  isActive                    Boolean    @default(true)
+  createdAt                   DateTime   @default(now())
+  updatedAt                   DateTime   @updatedAt
+
+  parcel                      LandParcel @relation(fields: [parcelId], references: [parcelId], onDelete: Cascade)
+
+  @@index([parcelId])
+  @@index([proposedNewOwnerAddress])
+  @@index([isActive])
+}
+
+model Document {
+  id               String          @id @default(uuid())
+  parcelId         String?
+  fileName         String
+  originalName     String
+  mimeType         String
+  sizeBytes        Int
+  sha256Hash       String
+  filePath         String
+  purpose          DocumentPurpose @default(OTHER)
+  uploadedByUserId String?
+  createdAt        DateTime        @default(now())
+
+  parcel           LandParcel?     @relation(fields: [parcelId], references: [parcelId], onDelete: SetNull)
+  uploadedByUser   User?           @relation("UserUploadedDocuments", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([parcelId])
+  @@index([sha256Hash])
+}
+
+model ActivityLog {
+  id            String    @id @default(uuid())
+  userId        String?
+  walletAddress String?
+  action        String    // e.g. "GENESIS_REGISTERED", "TRANSFER_INITIATED", "MORTGAGE_APPLIED"
+  entityType    String    // e.g. "PARCEL", "TRANSFER", "MORTGAGE", "DISPUTE", "AUTH"
+  entityId      String?   // parcelId or other ID
+  details       Json?     // structured action metadata
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime  @default(now())
+
+  user          User?     @relation("UserActivityLogs", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType])
+  @@index([entityId])
+  @@index([action])
+  @@index([createdAt])
+}
