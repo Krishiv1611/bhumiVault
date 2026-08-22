@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { BhumiVaultRegistry } from "../typechain-types";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 
@@ -253,6 +254,62 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
       expect(activeTransfer.seller).to.equal(rahul.address);
       expect(activeTransfer.sellerApproved).to.be.true;
     });
+
+    it("Should support Gasless EIP-712 Meta-Transaction for Buyer Acceptance", async function () {
+      // Step 1: Owner (Rahul) initiates transfer normally
+      await registry.connect(rahul).initiateTransfer(
+        SAMPLE_PARCEL_ID,
+        amit.address,
+        5000000,
+        SALE_DEED_HASH_1
+      );
+
+      const contractAddress = await registry.getAddress();
+      const network = await ethers.provider.getNetwork();
+
+      const domain = {
+        name: "BhumiVaultRegistry",
+        version: "1.0.0",
+        chainId: Number(network.chainId),
+        verifyingContract: contractAddress,
+      };
+
+      const types = {
+        TransferAcceptance: [
+          { name: "parcelId", type: "string" },
+          { name: "seller", type: "address" },
+          { name: "nonce", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+        ],
+      };
+
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const nonce = await registry.userNonces(amit.address);
+
+      const value = {
+        parcelId: SAMPLE_PARCEL_ID,
+        seller: rahul.address,
+        nonce: nonce,
+        deadline: deadline,
+      };
+
+      // Buyer (Amit) signs off-chain EIP-712 message
+      const signature = await amit.signTypedData(domain, types, value);
+
+      // Relayer (or Registrar) submits transaction on-chain on behalf of Amit
+      await expect(
+        registry.connect(registrar).buyerAcceptTransferWithSignature(
+          SAMPLE_PARCEL_ID,
+          deadline,
+          signature
+        )
+      ).to.emit(registry, "TransferBuyerAccepted")
+        .withArgs(SAMPLE_PARCEL_ID, amit.address, (val: any) => true);
+
+      // Verify transfer request is active and buyer accepted
+      const activeTransfer = await registry.getActiveTransfer(SAMPLE_PARCEL_ID);
+      expect(activeTransfer.buyerAccepted).to.be.true;
+    });
   });
 
   describe("4. Multi-Lien Bank Mortgages & Multi-Dispute Court Injunctions", function () {
@@ -384,7 +441,7 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
       );
     });
 
-    it("Should require Multi-Sig (Sub-Registrar + District Court Judge) to recover ownership for legal heir", async function () {
+    it("Should require Multi-Sig (Sub-Registrar + District Court Judge) to recover ownership for legal heir and respect 30-day challenge period", async function () {
       const SUCCESSION_CERT_HASH = "0x89abcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678";
 
       // Step 1: Sub-Registrar initiates recovery based on verified physical Aadhaar KYC & Death Certificate
@@ -400,8 +457,24 @@ describe("BHUMI-VAULT: Secure Authorization & Fraud Prevention Smart Contract", 
       let parcel = await registry.getParcel(SAMPLE_PARCEL_ID);
       expect(parcel.currentOwner).to.equal(rahul.address);
 
-      // Step 2: District Court Judge verifies decree and approves
+      // Step 2: District Court Judge verifies decree and approves, starting challenge period
       await expect(registry.connect(judge).approveOwnershipRecovery(SAMPLE_PARCEL_ID))
+        .to.emit(registry, "OwnershipRecoveryChallengeStarted");
+
+      // Verify ownership is STILL NOT changed yet
+      parcel = await registry.getParcel(SAMPLE_PARCEL_ID);
+      expect(parcel.currentOwner).to.equal(rahul.address);
+
+      // Attempt to finalize early -> should revert
+      await expect(
+        registry.connect(registrar).finalizeOwnershipRecovery(SAMPLE_PARCEL_ID)
+      ).to.be.revertedWith("BHUMI: 30-day Challenge period is still active");
+
+      // Fast forward time by 30 days
+      await time.increase(30 * 24 * 60 * 60 + 1);
+
+      // Step 3: Finalize recovery after challenge period
+      await expect(registry.connect(registrar).finalizeOwnershipRecovery(SAMPLE_PARCEL_ID))
         .to.emit(registry, "OwnershipRecoveryApproved")
         .withArgs(SAMPLE_PARCEL_ID, legalHeir.address, registrar.address, judge.address, (val: any) => true);
 

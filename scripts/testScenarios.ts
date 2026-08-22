@@ -266,7 +266,16 @@ async function main() {
 
   // Step 2: District Court Judge approves decree
   await registry.connect(judge).approveOwnershipRecovery(PARCEL_ID);
-  successLog("District Court Judge approved Recovery (Signer 2 of 2). Multi-Sig Threshold Met!");
+  successLog("District Court Judge approved Recovery (Signer 2 of 2). 30-Day Challenge Period Started!");
+
+  // Fast forward time by 30 days
+  const thirtyDays = 30 * 24 * 60 * 60 + 1;
+  await ethers.provider.send("evm_increaseTime", [thirtyDays]);
+  await ethers.provider.send("evm_mine", []);
+  
+  // Step 3: Finalize Recovery
+  await registry.connect(registrar).finalizeOwnershipRecovery(PARCEL_ID);
+  successLog("30-Day Challenge Period expired. Sub-Registrar finalized the mutation.");
 
   parcel = await registry.getParcel(PARCEL_ID);
   successLog(`🎉 Ownership Successfully Recovered to Legal Heir: ${parcel.currentOwner} (${legalHeir.address})`);

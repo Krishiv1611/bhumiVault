@@ -57,6 +57,8 @@ export interface OwnershipRecoveryRequestData {
   registrarSigner: string;
   judiciarySigner: string;
   requestedTimestamp: number;
+  challengeEndTime: number;
+  isFinalized: boolean;
   isActive: boolean;
 }
 
@@ -276,6 +278,62 @@ export class BhumiVaultClient {
   }
 
   /**
+   * Generates off-chain EIP-712 signature for gasless buyer acceptance.
+   */
+  async signBuyerAcceptIntent(
+    parcelId: string,
+    sellerAddress: string,
+    buyerWallet: Wallet,
+    deadline: number
+  ): Promise<string> {
+    const network = await this.provider.getNetwork();
+    const domain: TypedDataDomain = {
+      name: "BhumiVaultRegistry",
+      version: "1.0.0",
+      chainId: Number(network.chainId),
+      verifyingContract: this.contractAddress,
+    };
+
+    const types: Record<string, TypedDataField[]> = {
+      TransferAcceptance: [
+        { name: "parcelId", type: "string" },
+        { name: "seller", type: "address" },
+        { name: "nonce", type: "uint256" },
+        { name: "deadline", type: "uint256" },
+      ],
+    };
+
+    const nonce = await (this.contract as any).userNonces(buyerWallet.address);
+
+    const value = {
+      parcelId,
+      seller: sellerAddress,
+      nonce: Number(nonce),
+      deadline,
+    };
+
+    return await buyerWallet.signTypedData(domain, types, value);
+  }
+
+  /**
+   * Step 2 (Gasless Relayer): Submits buyer's off-chain EIP-712 signature.
+   */
+  async buyerAcceptTransferWithSignature(
+    parcelId: string,
+    deadline: number,
+    buyerSignature: string,
+    relayerSigner: Signer
+  ): Promise<ethers.ContractTransactionReceipt | null> {
+    const contractWithSigner = this.contract.connect(relayerSigner) as any;
+    const tx = await contractWithSigner.buyerAcceptTransferWithSignature(
+      parcelId,
+      deadline,
+      buyerSignature
+    );
+    return await tx.wait();
+  }
+
+  /**
    * Step 3: Government Sub-Registrar authorizes and commits ownership mutation.
    */
   async authorizeAndCommitTransfer(
@@ -429,6 +487,18 @@ export class BhumiVaultClient {
     return await tx.wait();
   }
 
+  /**
+   * Finalize Government-Assisted Recovery after 30-day challenge period.
+   */
+  async finalizeOwnershipRecovery(
+    parcelId: string,
+    finalizerSigner: Signer
+  ): Promise<ethers.ContractTransactionReceipt | null> {
+    const contractWithSigner = this.contract.connect(finalizerSigner) as any;
+    const tx = await contractWithSigner.finalizeOwnershipRecovery(parcelId);
+    return await tx.wait();
+  }
+
   // -------------------------------------------------------------
   // READ / VERIFICATION QUERIES
   // -------------------------------------------------------------
@@ -511,7 +581,7 @@ export class BhumiVaultClient {
 
   async getRecoveryRequest(parcelId: string): Promise<OwnershipRecoveryRequestData | null> {
     const req = await (this.contract as any).getRecoveryRequest(parcelId);
-    if (!req.isActive) return null;
+    if (!req.isActive && !req.isFinalized) return null;
     return {
       parcelId: req.parcelId,
       currentRecordedOwner: req.currentRecordedOwner,
@@ -522,6 +592,8 @@ export class BhumiVaultClient {
       registrarSigner: req.registrarSigner,
       judiciarySigner: req.judiciarySigner,
       requestedTimestamp: Number(req.requestedTimestamp),
+      challengeEndTime: Number(req.challengeEndTime),
+      isFinalized: req.isFinalized,
       isActive: req.isActive,
     };
   }

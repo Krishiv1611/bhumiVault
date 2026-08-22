@@ -35,6 +35,12 @@ contract BhumiVaultRegistry is AccessControl, ReentrancyGuard, EIP712 {
             "TransferAuthorization(string parcelId,address buyer,uint256 saleConsideration,string saleDeedHash,uint256 nonce,uint256 deadline)"
         );
 
+    // EIP-712 TypeHash for Buyer Acceptance (Gasless)
+    bytes32 public constant TRANSFER_ACCEPT_TYPEHASH =
+        keccak256(
+            "TransferAcceptance(string parcelId,address seller,uint256 nonce,uint256 deadline)"
+        );
+
     // -------------------------------------------------------------
     // ENUMS & STRUCTS
     // -------------------------------------------------------------
@@ -115,6 +121,8 @@ contract BhumiVaultRegistry is AccessControl, ReentrancyGuard, EIP712 {
         address registrarSigner;
         address judiciarySigner;
         uint256 requestedTimestamp;
+        uint256 challengeEndTime;
+        bool isFinalized;
         bool isActive;
     }
 
@@ -272,6 +280,12 @@ contract BhumiVaultRegistry is AccessControl, ReentrancyGuard, EIP712 {
         address indexed newOwner,
         address indexed registrarApprover,
         address judgeApprover,
+        uint256 timestamp
+    );
+
+    event OwnershipRecoveryChallengeStarted(
+        string indexed parcelId,
+        uint256 challengeEndTime,
         uint256 timestamp
     );
 
@@ -531,6 +545,43 @@ contract BhumiVaultRegistry is AccessControl, ReentrancyGuard, EIP712 {
     }
 
     /**
+     * @notice Step 2 of Transfer (Gasless Meta-Transaction for Rural Citizens):
+     *         Buyer digitally accepts the transfer via signature.
+     */
+    function buyerAcceptTransferWithSignature(
+        string calldata parcelId,
+        uint256 deadline,
+        bytes calldata buyerSignature
+    ) external nonReentrant {
+        TransferRequest storage req = _activeTransfers[parcelId];
+        require(req.isActive, "BHUMI: No active transfer request");
+        require(block.timestamp <= req.expiryTimestamp, "BHUMI: Transfer request has expired");
+        require(block.timestamp <= deadline, "BHUMI: Buyer signature expired");
+        require(!req.buyerAccepted, "BHUMI: Buyer already accepted transfer");
+
+        // Verify EIP-712 Signature
+        uint256 currentNonce = userNonces[req.buyer];
+        bytes32 structHash = keccak256(
+            abi.encode(
+                TRANSFER_ACCEPT_TYPEHASH,
+                keccak256(bytes(parcelId)),
+                req.seller,
+                currentNonce,
+                deadline
+            )
+        );
+
+        bytes32 digest = _hashTypedDataV4(structHash);
+        address recoveredSigner = ECDSA.recover(digest, buyerSignature);
+        require(recoveredSigner == req.buyer, "BHUMI: FRAUD_DETECTED - Invalid cryptographic signature from buyer");
+
+        userNonces[req.buyer] = currentNonce + 1;
+        req.buyerAccepted = true;
+
+        emit TransferBuyerAccepted(parcelId, req.buyer, block.timestamp);
+    }
+
+    /**
      * @notice Step 3 & 4 of Transfer: Government Sub-Registrar authorizes and commits transfer.
      * @dev Enforces 2-Key authorization (Owner Key + Govt Key) AND Buyer Acceptance.
      */
@@ -613,6 +664,7 @@ contract BhumiVaultRegistry is AccessControl, ReentrancyGuard, EIP712 {
         require(req.isActive, "BHUMI: No active transfer request");
         require(
             msg.sender == req.seller ||
+                msg.sender == req.buyer ||
                 hasRole(REGISTRAR_ROLE, msg.sender) ||
                 block.timestamp > req.expiryTimestamp,
             "BHUMI: Unauthorized to cancel transfer"
@@ -785,6 +837,9 @@ contract BhumiVaultRegistry is AccessControl, ReentrancyGuard, EIP712 {
         require(parcel.exists, "BHUMI: Parcel does not exist");
         require(proposedNewOwner != address(0), "BHUMI: Invalid proposed new owner address");
         require(proposedNewOwner != parcel.currentOwner, "BHUMI: Proposed owner matches current owner");
+        
+        require(!_recoveryRequests[parcelId].isActive, "BHUMI: Active recovery request already exists");
+        require(!parcel.isLocked, "BHUMI: Cannot initiate recovery on frozen property");
 
         bool fromRegistrar = hasRole(REGISTRAR_ROLE, msg.sender);
 
@@ -798,6 +853,8 @@ contract BhumiVaultRegistry is AccessControl, ReentrancyGuard, EIP712 {
             registrarSigner: fromRegistrar ? msg.sender : address(0),
             judiciarySigner: !fromRegistrar ? msg.sender : address(0),
             requestedTimestamp: block.timestamp,
+            challengeEndTime: 0,
+            isFinalized: false,
             isActive: true
         });
 
@@ -811,15 +868,17 @@ contract BhumiVaultRegistry is AccessControl, ReentrancyGuard, EIP712 {
     }
 
     /**
-     * @notice Approves ownership recovery. When both Registrar + Judge have signed, ownership is updated.
+     * @notice Approves ownership recovery. When both Registrar + Judge have signed, the 30-day challenge period begins.
      */
     function approveOwnershipRecovery(
         string calldata parcelId
     ) external nonReentrant {
         OwnershipRecoveryRequest storage req = _recoveryRequests[parcelId];
         require(req.isActive, "BHUMI: No active recovery request");
+        require(req.challengeEndTime == 0, "BHUMI: Challenge period already started");
 
         LandParcel storage parcel = _parcels[parcelId];
+        require(!parcel.isLocked, "BHUMI: Cannot approve recovery on frozen property");
 
         if (hasRole(REGISTRAR_ROLE, msg.sender) && !req.registrarApproved) {
             req.registrarApproved = true;
@@ -833,46 +892,71 @@ contract BhumiVaultRegistry is AccessControl, ReentrancyGuard, EIP712 {
 
         // Check if Multi-Sig threshold reached (Both Registrar + Judge Approved)
         if (req.registrarApproved && req.judiciaryApproved) {
-            address previousOwner = parcel.currentOwner;
-            address newOwner = req.proposedNewOwner;
-
-            parcel.currentOwner = newOwner;
-            parcel.lastUpdatedTimestamp = block.timestamp;
-            req.isActive = false;
-
-            // Log in immutable audit trail
-            uint256 historyCount = _ownershipHistories[parcelId].length;
-            OwnershipHistoryEntry memory newEntry = OwnershipHistoryEntry({
-                historyIndex: historyCount,
-                parcelId: parcelId,
-                fromOwner: previousOwner,
-                toOwner: newOwner,
-                transferType: "INHERITANCE_RECOVERY",
-                deedDocumentHash: req.recoveryReasonDocHash,
-                registrarApprover: req.registrarSigner,
-                timestamp: block.timestamp,
-                blockNumber: block.number
-            });
-
-            _ownershipHistories[parcelId].push(newEntry);
-
-            emit OwnershipRecoveryApproved(
+            // Start 30 day challenge period
+            req.challengeEndTime = block.timestamp + 30 days;
+            
+            emit OwnershipRecoveryChallengeStarted(
                 parcelId,
-                newOwner,
-                req.registrarSigner,
-                req.judiciarySigner,
-                block.timestamp
-            );
-
-            emit TransferCommitted(
-                parcelId,
-                previousOwner,
-                newOwner,
-                req.recoveryReasonDocHash,
-                req.registrarSigner,
+                req.challengeEndTime,
                 block.timestamp
             );
         }
+    }
+
+    /**
+     * @notice Finalizes ownership recovery after the 30-day challenge period ends.
+     */
+    function finalizeOwnershipRecovery(string calldata parcelId) external nonReentrant {
+        OwnershipRecoveryRequest storage req = _recoveryRequests[parcelId];
+        require(req.isActive, "BHUMI: No active recovery request");
+        require(req.registrarApproved && req.judiciaryApproved, "BHUMI: Approvals pending");
+        require(req.challengeEndTime > 0, "BHUMI: Challenge period not started");
+        require(block.timestamp >= req.challengeEndTime, "BHUMI: 30-day Challenge period is still active");
+        require(!req.isFinalized, "BHUMI: Already finalized");
+
+        LandParcel storage parcel = _parcels[parcelId];
+        require(!parcel.isLocked, "BHUMI: Cannot finalize on explicitly frozen property");
+
+        address previousOwner = parcel.currentOwner;
+        address newOwner = req.proposedNewOwner;
+
+        parcel.currentOwner = newOwner;
+        parcel.lastUpdatedTimestamp = block.timestamp;
+        req.isActive = false;
+        req.isFinalized = true;
+
+        // Log in immutable audit trail
+        uint256 historyCount = _ownershipHistories[parcelId].length;
+        OwnershipHistoryEntry memory newEntry = OwnershipHistoryEntry({
+            historyIndex: historyCount,
+            parcelId: parcelId,
+            fromOwner: previousOwner,
+            toOwner: newOwner,
+            transferType: "INHERITANCE_RECOVERY",
+            deedDocumentHash: req.recoveryReasonDocHash,
+            registrarApprover: req.registrarSigner,
+            timestamp: block.timestamp,
+            blockNumber: block.number
+        });
+
+        _ownershipHistories[parcelId].push(newEntry);
+
+        emit OwnershipRecoveryApproved(
+            parcelId,
+            newOwner,
+            req.registrarSigner,
+            req.judiciarySigner,
+            block.timestamp
+        );
+
+        emit TransferCommitted(
+            parcelId,
+            previousOwner,
+            newOwner,
+            req.recoveryReasonDocHash,
+            req.registrarSigner,
+            block.timestamp
+        );
     }
 
     // -------------------------------------------------------------
