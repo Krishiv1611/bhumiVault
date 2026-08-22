@@ -1,0 +1,45 @@
+{
+  "name": "bhumi-vault-blockchain",
+  "version": "1.0.0",
+  "description": "Core Blockchain Smart Contracts, Authorization Engine, Fraud Prevention and SDK for BHUMI-VAULT (SIH 2025)",
+  "main": "sdk/bhumiVaultClient.ts",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "test:scenarios": "hardhat run scripts/testScenarios.ts",
+    "node": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
+    "seed:local": "hardhat run scripts/seedDemoData.ts --network localhost",
+    "seed:hardhat": "hardhat run scripts/seedDemoData.ts",
+    "start:demo-api": "ts-node sdk/demoApiServer.ts"
+  },
+  "keywords": [
+    "blockchain",
+    "smart-contracts",
+    "land-registry",
+    "fraud-prevention",
+    "multi-sig",
+    "hyperledger",
+    "ethereum",
+    "sih2025"
+  ],
+  "author": "BhumiVault Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts": "^5.0.2",
+    "@types/chai": "^4.3.16",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.14.9",
+    "chai": "^4.4.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.1",
+    "express": "^4.19.2",
+    "hardhat": "^2.22.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.2"
+  }
+}
