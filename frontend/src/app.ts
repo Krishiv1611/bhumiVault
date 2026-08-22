@@ -392,34 +392,94 @@ function notice(): string {
 function authView(): string {
   return `
     <main class="auth">
-      <section class="auth-panel">
-        <div class="brand large"><div class="brand-mark">BV</div><div><strong>BhumiVault</strong><span>Blockchain-backed land records</span></div></div>
+      <section class="auth-card">
+        <div class="auth-brand">
+          <div class="brand-mark">BV</div>
+          <div>
+            <strong>BhumiVault</strong>
+            <span>Secure blockchain land registry</span>
+          </div>
+        </div>
+
         ${notice()}
-        <div class="auth-grid">
-          <form data-form="login" class="panel">
-            <p class="eyebrow">Existing user</p>
-            <h1>Sign in to the registry</h1>
-            <label>Email<input name="email" type="email" required placeholder="registrar@example.com" /></label>
-            <label>Password<input name="password" type="password" required placeholder="Minimum 8 characters" /></label>
-            <button class="primary" type="submit">Sign in</button>
-          </form>
-          <form data-form="register" class="panel">
-            <p class="eyebrow">Demo access</p>
-            <h2>Create a role-based account</h2>
-            <div class="two">
-              <label>Full name<input name="fullName" required /></label>
-              <label>Role<select name="role">${["CITIZEN", "REGISTRAR", "REVENUE", "BANK", "JUDICIARY", "ADMIN"].map((r) => `<option>${r}</option>`).join("")}</select></label>
+
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-tab="login" type="button">Sign in</button>
+          <button class="auth-tab" data-tab="register" type="button">Create account</button>
+        </div>
+
+        <!-- LOGIN PANEL -->
+        <div class="auth-pane" id="pane-login">
+          <form data-form="login">
+            <div class="field-group">
+              <label class="field-label">Email address
+                <input name="email" type="email" required placeholder="you@example.com" autocomplete="email" />
+              </label>
+              <label class="field-label">Password
+                <input name="password" type="password" required placeholder="Enter your password" autocomplete="current-password" />
+              </label>
             </div>
-            <label>Email<input name="email" type="email" required /></label>
-            <label>Password<input name="password" type="password" required minlength="8" /></label>
-            <label>Wallet address<input name="walletAddress" placeholder="0x..." /></label>
-            <div class="two">
-              <label>Organization<input name="organization" /></label>
-              <label>Designation<input name="designation" /></label>
-            </div>
-            <button type="submit">Create account</button>
+            <button class="primary full-btn" type="submit">Sign in →</button>
+            <p class="auth-hint">Don't have an account? <button class="link-btn" data-tab="register" type="button">Create one</button></p>
           </form>
         </div>
+
+        <!-- REGISTER PANEL -->
+        <div class="auth-pane hidden" id="pane-register">
+          <form data-form="register">
+            <p class="auth-section-label">Your identity</p>
+            <div class="field-row">
+              <label class="field-label">Full name <span class="req">*</span>
+                <input name="fullName" required placeholder="Rahul Sharma" />
+              </label>
+              <label class="field-label">Email address <span class="req">*</span>
+                <input name="email" type="email" required placeholder="you@example.com" autocomplete="email" />
+              </label>
+            </div>
+            <label class="field-label">Password <span class="req">*</span>
+              <input name="password" type="password" required minlength="8" placeholder="Minimum 8 characters" autocomplete="new-password" />
+            </label>
+
+            <p class="auth-section-label" style="margin-top:1.2rem">Your role in the system</p>
+            <div class="role-picker">
+              ${[
+                { value: "CITIZEN",   icon: "🏠", label: "Citizen / Landowner", desc: "Buy, sell, and view land records. Start a property transfer." },
+                { value: "REGISTRAR", icon: "🏛️", label: "Sub-Registrar",       desc: "Authorize transfers, freeze parcels, approve recoveries." },
+                { value: "REVENUE",   icon: "🗺️", label: "Revenue Dept.",       desc: "Register new land parcels (genesis registration)." },
+                { value: "BANK",      icon: "🏦", label: "Bank Officer",         desc: "Apply and release mortgage liens on properties." },
+                { value: "JUDICIARY", icon: "⚖️", label: "Court / Judiciary",   desc: "Place and lift court injunctions; approve recoveries." },
+                { value: "ADMIN",     icon: "🔑", label: "Admin",               desc: "System administration (reserved)." },
+              ].map((r, i) => `
+                <label class="role-card ${i === 0 ? "selected" : ""}">
+                  <input type="radio" name="role" value="${r.value}" ${i === 0 ? "checked" : ""} />
+                  <span class="role-icon">${r.icon}</span>
+                  <span class="role-card-label">${r.label}</span>
+                  <span class="role-card-desc">${r.desc}</span>
+                </label>
+              `).join("")}
+            </div>
+
+            <p class="auth-section-label" style="margin-top:1.2rem">Organisation <span class="opt">(optional)</span></p>
+            <div class="field-row">
+              <label class="field-label">Organisation
+                <input name="organization" placeholder="e.g. State Bank of India" />
+              </label>
+              <label class="field-label">Designation
+                <input name="designation" placeholder="e.g. Loan Officer" />
+              </label>
+            </div>
+
+            <p class="auth-section-label" style="margin-top:1.2rem">Blockchain wallet <span class="opt">(optional — needed for on-chain actions)</span></p>
+            <label class="field-label">Ethereum wallet address
+              <input name="walletAddress" placeholder="0x..." autocomplete="off" />
+              <span class="field-hint">Connect your MetaMask or Hardhat account address here.</span>
+            </label>
+
+            <button class="primary full-btn" type="submit">Create account →</button>
+            <p class="auth-hint">Already have an account? <button class="link-btn" data-tab="login" type="button">Sign in</button></p>
+          </form>
+        </div>
+
       </section>
     </main>
   `;
@@ -648,15 +708,34 @@ function pendingTransfers(): string {
 }
 
 function documentsView(): string {
-  return `<form data-form="upload-document" class="panel">
-    <h3>Upload document</h3>
-    <div class="form-grid">
-      <label>Parcel ID<input name="parcelId" /></label>
-      <label>Purpose<select name="purpose">${["SALE_DEED", "GENESIS_DEED", "MORTGAGE_DOC", "MORTGAGE_NOC", "COURT_ORDER", "COURT_JUDGMENT", "RECOVERY_DOC", "SUCCESSION_CERTIFICATE", "CADASTRAL_MAP", "IDENTITY_PROOF", "OTHER"].map((x) => `<option>${x}</option>`).join("")}</select></label>
-      <label class="wide">File<input name="file" type="file" required /></label>
-    </div>
-    <button class="primary">Upload and hash</button>
-  </form>`;
+  return `
+    <details class="panel" open>
+      <summary>📄 How document hashing works</summary>
+      <div class="hash-explainer">
+        <p><strong>1. Upload a PDF</strong> using the form below. The backend immediately computes its <strong>SHA-256 fingerprint</strong> (a 64-character code unique to that file's contents).</p>
+        <p><strong>2. Where to see the hash:</strong> After a successful upload, a green notice banner appears at the top of this page showing the first 24 characters of the hash — e.g. <code>3a7bf29c04d1…</code>. The full hash is also visible in the document list on the Parcel Detail page (under "Documents").</p>
+        <p><strong>3. Where you paste the hash:</strong></p>
+        <ul class="hash-uses">
+          <li><strong>Register Parcel</strong> → "Deed hash" field  (genesis deed PDF)</li>
+          <li><strong>Transfers</strong>        → "Sale deed hash" field (sale agreement PDF)</li>
+          <li><strong>Mortgages</strong>        → "Mortgage document hash" / "Release document hash" fields</li>
+          <li><strong>Disputes</strong>         → "Court order hash" / "Judgment document hash" fields</li>
+          <li><strong>Recovery</strong>         → "Recovery reason document hash" field</li>
+          <li><strong>Parcel Detail</strong>    → "Verify document" inline form (to check a hash matches the record)</li>
+        </ul>
+        <p class="muted" style="margin:0">This way the blockchain stores only the fingerprint — not the file itself — and anyone can verify the document has not been tampered with.</p>
+      </div>
+    </details>
+    <form data-form="upload-document" class="panel">
+      <h3>Upload document</h3>
+      <div class="form-grid">
+        <label>Parcel ID <span class="opt">(optional — leave blank to upload without linking)</span><input name="parcelId" placeholder="IN-MH-PUN-2025-0987" /></label>
+        <label>Purpose<select name="purpose">${["SALE_DEED", "GENESIS_DEED", "MORTGAGE_DOC", "MORTGAGE_NOC", "COURT_ORDER", "COURT_JUDGMENT", "RECOVERY_DOC", "SUCCESSION_CERTIFICATE", "CADASTRAL_MAP", "IDENTITY_PROOF", "OTHER"].map((x) => `<option>${x}</option>`).join("")}</select></label>
+        <label class="wide">File (PDF, image, or any document)<input name="file" type="file" required /></label>
+      </div>
+      <button class="primary">Upload and generate hash</button>
+      <p class="muted" style="margin:0">After upload the SHA-256 hash will appear in the green success banner above. Copy it to use in other forms.</p>
+    </form>`;
 }
 
 function mortgagesView(): string {
@@ -751,6 +830,26 @@ document.addEventListener("click", (event) => {
   const target = event.target as HTMLElement;
   const route = target.closest<HTMLElement>("[data-route]")?.dataset.route;
   if (route) navigate(route);
+
+  // Auth tab switching
+  const tab = target.closest<HTMLElement>("[data-tab]")?.dataset.tab;
+  if (tab) {
+    const loginPane = document.getElementById("pane-login");
+    const registerPane = document.getElementById("pane-register");
+    const tabs = document.querySelectorAll<HTMLElement>(".auth-tab");
+    if (loginPane && registerPane) {
+      loginPane.classList.toggle("hidden", tab !== "login");
+      registerPane.classList.toggle("hidden", tab !== "register");
+    }
+    tabs.forEach(t => t.classList.toggle("active", t.dataset.tab === tab));
+    return;
+  }
+
+  // Role-card radio highlighting
+  if (target.closest(".role-card")) {
+    document.querySelectorAll<HTMLElement>(".role-card").forEach(c => c.classList.remove("selected"));
+    target.closest<HTMLElement>(".role-card")?.classList.add("selected");
+  }
 
   const action = target.closest<HTMLElement>("[data-action]")?.dataset.action;
   const id = target.closest<HTMLElement>("[data-id]")?.dataset.id;
